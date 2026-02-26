@@ -202,7 +202,20 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.join(__dirname, "dist")));
+    const distPath = path.join(__dirname, "dist");
+    const fallbackDistPath = __dirname; // If server.js is inside dist/
+    
+    if (fs.existsSync(path.join(distPath, "index.html"))) {
+      app.use(express.static(distPath));
+      app.get("*", (req, res) => {
+        res.sendFile(path.join(distPath, "index.html"));
+      });
+    } else {
+      app.use(express.static(fallbackDistPath));
+      app.get("*", (req, res) => {
+        res.sendFile(path.join(fallbackDistPath, "index.html"));
+      });
+    }
   }
 
   app.listen(PORT, "0.0.0.0", () => {
