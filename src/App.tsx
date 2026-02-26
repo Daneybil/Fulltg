@@ -70,6 +70,11 @@ export default function App() {
   const [targetGroup, setTargetGroup] = useState("");
   const [scrapedMembers, setScrapedMembers] = useState<any[]>([]);
   const [selectedSession, setSelectedSession] = useState("");
+  const [scrapeLimit, setScrapeLimit] = useState("5000");
+  const [addDelay, setAddDelay] = useState("5000");
+  const [spamStatus, setSpamStatus] = useState("");
+  const [messageTarget, setMessageTarget] = useState("");
+  const [messageContent, setMessageContent] = useState("");
 
   useEffect(() => {
     fetchSessions();
@@ -170,12 +175,16 @@ export default function App() {
     e.preventDefault();
     if (!selectedSession) return addLog("error", "Select a session first");
     setLoading(true);
-    addLog("command", `Scraping members from ${sourceGroup}...`);
+    addLog("command", `Scraping members from ${sourceGroup} (Limit: ${scrapeLimit})...`);
     try {
       const res = await safeFetch("/api/scrape", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: selectedSession, groupLink: sourceGroup })
+        body: JSON.stringify({ 
+          phone: selectedSession, 
+          groupLink: sourceGroup,
+          limit: parseInt(scrapeLimit)
+        })
       });
 
       if (!res.ok) {
@@ -202,7 +211,7 @@ export default function App() {
       return addLog("error", "Missing session, target group, or scraped members");
     }
     setLoading(true);
-    addLog("command", `Adding ${scrapedMembers.length} members to ${targetGroup}...`);
+    addLog("command", `Adding ${scrapedMembers.length} members to ${targetGroup} (Delay: ${addDelay}ms)...`);
     try {
       const res = await safeFetch("/api/add-members", {
         method: "POST",
@@ -210,7 +219,8 @@ export default function App() {
         body: JSON.stringify({ 
           phone: selectedSession, 
           targetGroup, 
-          members: scrapedMembers.map(m => m.username) 
+          members: scrapedMembers.map(m => m.username),
+          delay: parseInt(addDelay)
         })
       });
 
@@ -223,6 +233,87 @@ export default function App() {
       if (data.success) {
         const successCount = data.results.filter((r: any) => r.status === "success").length;
         addLog("success", `Operation complete. Added ${successCount}/${data.results.length} members.`);
+        
+        // Log system messages from backend (like flood waits)
+        data.results.filter((r: any) => r.system).forEach((r: any) => addLog("info", r.message));
+      } else {
+        addLog("error", data.error);
+      }
+    } catch (e: any) {
+      addLog("error", e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSpamCheck = async () => {
+    if (!selectedSession) return addLog("error", "Select a session first");
+    setLoading(true);
+    addLog("command", "Checking account spam status...");
+    try {
+      const res = await safeFetch("/api/spam-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: selectedSession })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSpamStatus(data.status);
+        addLog("success", `SpamBot Response: ${data.status.slice(0, 50)}...`);
+      } else {
+        addLog("error", data.error);
+      }
+    } catch (e: any) {
+      addLog("error", e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedSession) return addLog("error", "Select a session first");
+    setLoading(true);
+    addLog("command", `Sending message to ${messageTarget}...`);
+    try {
+      const res = await safeFetch("/api/send-message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          phone: selectedSession, 
+          target: messageTarget, 
+          message: messageContent 
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        addLog("success", "Message sent successfully.");
+        setMessageContent("");
+      } else {
+        addLog("error", data.error);
+      }
+    } catch (e: any) {
+      addLog("error", e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogout = async (phoneToLogout: string) => {
+    if (!window.confirm(`Are you sure you want to logout ${phoneToLogout}?`)) return;
+    setLoading(true);
+    addLog("command", `Logging out ${phoneToLogout}...`);
+    try {
+      const res = await safeFetch("/api/auth/logout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: phoneToLogout })
+      });
+      const data = await res.json();
+      if (data.success) {
+        addLog("success", "Logged out successfully.");
+        fetchSessions();
+        if (selectedSession === phoneToLogout) setSelectedSession("");
       } else {
         addLog("error", data.error);
       }
@@ -481,8 +572,248 @@ export default function App() {
                   </div>
                 )}
 
+                {/* Logout Accounts */}
+                {selectedOption === 2 && (
+                  <div className="space-y-6">
+                    <h2 className="text-2xl font-bold flex items-center gap-3">
+                      <LogOut /> LOGOUT ACCOUNTS
+                    </h2>
+                    <div className="space-y-4">
+                      {sessions.length === 0 ? (
+                        <p className="opacity-50 italic">No active sessions found.</p>
+                      ) : (
+                        sessions.map(s => (
+                          <div key={s.phone} className="flex items-center justify-between p-4 bg-black border border-[#00ff00]/20 rounded">
+                            <div>
+                              <p className="font-bold">{s.phone}</p>
+                              <p className="text-[10px] opacity-50">API ID: {s.api_id}</p>
+                            </div>
+                            <button
+                              onClick={() => handleLogout(s.phone)}
+                              className="px-4 py-2 bg-red-500/20 text-red-500 hover:bg-red-500 hover:text-white rounded text-xs font-bold transition-colors"
+                            >
+                              LOGOUT
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Spam Checker */}
+                {selectedOption === 4 && (
+                  <div className="space-y-6">
+                    <h2 className="text-2xl font-bold flex items-center gap-3">
+                      <ShieldCheck /> SPAM-CHECKER
+                    </h2>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <label className="text-xs opacity-50">SELECT ACCOUNT</label>
+                        <select 
+                          value={selectedSession}
+                          onChange={e => setSelectedSession(e.target.value)}
+                          className="w-full bg-black border border-[#00ff00]/30 p-3 rounded focus:border-[#00ff00] outline-none"
+                        >
+                          <option value="">-- SELECT SESSION --</option>
+                          {sessions.map(s => (
+                            <option key={s.phone} value={s.phone}>{s.phone}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <button
+                        onClick={handleSpamCheck}
+                        disabled={loading || !selectedSession}
+                        className="w-full bg-[#00ff00] text-black font-bold py-3 rounded hover:bg-[#00ff00]/90 disabled:opacity-50 flex justify-center items-center gap-2"
+                      >
+                        {loading ? <Loader2 className="animate-spin" /> : "CHECK SPAM STATUS"}
+                      </button>
+                      
+                      {spamStatus && (
+                        <div className="p-4 bg-black border border-[#00ff00]/30 rounded whitespace-pre-wrap text-sm leading-relaxed">
+                          <p className="text-[#00ff00] font-bold mb-2">SPAMBOT RESPONSE:</p>
+                          {spamStatus}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Scraper Form */}
+                {selectedOption === 14 && (
+                  <div className="space-y-6">
+                    <h2 className="text-2xl font-bold flex items-center gap-3">
+                      <Search /> SCRAPE MEMBERS
+                    </h2>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <label className="text-xs opacity-50">SELECT ACCOUNT</label>
+                        <select 
+                          value={selectedSession}
+                          onChange={e => setSelectedSession(e.target.value)}
+                          className="w-full bg-black border border-[#00ff00]/30 p-3 rounded focus:border-[#00ff00] outline-none"
+                        >
+                          <option value="">-- SELECT SESSION --</option>
+                          {sessions.map(s => (
+                            <option key={s.phone} value={s.phone}>{s.phone} (API: {s.api_id})</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-xs opacity-50">TARGET GROUP LINK / USERNAME</label>
+                          <input
+                            type="text"
+                            value={sourceGroup}
+                            onChange={e => setSourceGroup(e.target.value)}
+                            placeholder="https://t.me/examplegroup"
+                            className="w-full bg-black border border-[#00ff00]/30 p-3 rounded focus:border-[#00ff00] outline-none"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs opacity-50">SCRAPE LIMIT (0 = MAX)</label>
+                          <input
+                            type="number"
+                            value={scrapeLimit}
+                            onChange={e => setScrapeLimit(e.target.value)}
+                            className="w-full bg-black border border-[#00ff00]/30 p-3 rounded focus:border-[#00ff00] outline-none"
+                          />
+                        </div>
+                      </div>
+                      <button
+                        onClick={handleScrape}
+                        disabled={loading || !sourceGroup}
+                        className="w-full bg-[#00ff00] text-black font-bold py-3 rounded hover:bg-[#00ff00]/90 disabled:opacity-50 flex justify-center items-center gap-2"
+                      >
+                        {loading ? <Loader2 className="animate-spin" /> : "START SCRAPING"}
+                      </button>
+
+                      {scrapedMembers.length > 0 && (
+                        <div className="mt-6 border border-[#00ff00]/20 rounded p-4">
+                          <h3 className="text-sm font-bold mb-2">SCRAPED MEMBERS ({scrapedMembers.length})</h3>
+                          <div className="max-h-40 overflow-y-auto text-[10px] space-y-1 opacity-60">
+                            {scrapedMembers.map((m, i) => (
+                              <div key={i}>@{m.username} - {m.firstName} {m.lastName}</div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Adder Form */}
+                {selectedOption === 18 && (
+                  <div className="space-y-6">
+                    <h2 className="text-2xl font-bold flex items-center gap-3">
+                      <UserPlus /> ADD MEMBERS
+                    </h2>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <label className="text-xs opacity-50">SELECT ACCOUNT</label>
+                        <select 
+                          value={selectedSession}
+                          onChange={e => setSelectedSession(e.target.value)}
+                          className="w-full bg-black border border-[#00ff00]/30 p-3 rounded focus:border-[#00ff00] outline-none"
+                        >
+                          <option value="">-- SELECT SESSION --</option>
+                          {sessions.map(s => (
+                            <option key={s.phone} value={s.phone}>{s.phone}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-xs opacity-50">YOUR GROUP LINK / USERNAME</label>
+                          <input
+                            type="text"
+                            value={targetGroup}
+                            onChange={e => setTargetGroup(e.target.value)}
+                            placeholder="https://t.me/mygroup"
+                            className="w-full bg-black border border-[#00ff00]/30 p-3 rounded focus:border-[#00ff00] outline-none"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs opacity-50">DELAY PER ADD (MS)</label>
+                          <input
+                            type="number"
+                            value={addDelay}
+                            onChange={e => setAddDelay(e.target.value)}
+                            className="w-full bg-black border border-[#00ff00]/30 p-3 rounded focus:border-[#00ff00] outline-none"
+                          />
+                        </div>
+                      </div>
+                      <div className="p-4 bg-[#00ff00]/5 border border-[#00ff00]/20 rounded">
+                        <p className="text-xs opacity-70">
+                          READY TO ADD <span className="text-[#00ff00] font-bold">{scrapedMembers.length}</span> MEMBERS FROM THE SCRAPER LIST.
+                        </p>
+                        <p className="text-[10px] opacity-40 mt-1 italic">Professional Mode: Adding 1 by 1 with random human-like delays.</p>
+                      </div>
+                      <button
+                        onClick={handleAddMembers}
+                        disabled={loading || !targetGroup || scrapedMembers.length === 0}
+                        className="w-full bg-[#00ff00] text-black font-bold py-3 rounded hover:bg-[#00ff00]/90 disabled:opacity-50 flex justify-center items-center gap-2"
+                      >
+                        {loading ? <Loader2 className="animate-spin" /> : "START ADDING"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Send Messages */}
+                {selectedOption === 19 && (
+                  <div className="space-y-6">
+                    <h2 className="text-2xl font-bold flex items-center gap-3">
+                      <MessageSquare /> SEND MESSAGES
+                    </h2>
+                    <form onSubmit={handleSendMessage} className="space-y-4">
+                      <div className="space-y-2">
+                        <label className="text-xs opacity-50">SELECT ACCOUNT</label>
+                        <select 
+                          value={selectedSession}
+                          onChange={e => setSelectedSession(e.target.value)}
+                          className="w-full bg-black border border-[#00ff00]/30 p-3 rounded focus:border-[#00ff00] outline-none"
+                        >
+                          <option value="">-- SELECT SESSION --</option>
+                          {sessions.map(s => (
+                            <option key={s.phone} value={s.phone}>{s.phone}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs opacity-50">TARGET USERNAME / GROUP</label>
+                        <input
+                          type="text"
+                          value={messageTarget}
+                          onChange={e => setMessageTarget(e.target.value)}
+                          placeholder="@username or group_link"
+                          className="w-full bg-black border border-[#00ff00]/30 p-3 rounded focus:border-[#00ff00] outline-none"
+                          required
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs opacity-50">MESSAGE CONTENT</label>
+                        <textarea
+                          value={messageContent}
+                          onChange={e => setMessageContent(e.target.value)}
+                          placeholder="Type your message here..."
+                          className="w-full bg-black border border-[#00ff00]/30 p-3 rounded focus:border-[#00ff00] outline-none h-32 resize-none"
+                          required
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={loading || !selectedSession}
+                        className="w-full bg-[#00ff00] text-black font-bold py-3 rounded hover:bg-[#00ff00]/90 disabled:opacity-50 flex justify-center items-center gap-2"
+                      >
+                        {loading ? <Loader2 className="animate-spin" /> : "SEND MESSAGE"}
+                      </button>
+                    </form>
+                  </div>
+                )}
+
                 {/* Other menus placeholder */}
-                {![1, 14, 18].includes(selectedOption) && (
+                {![1, 2, 4, 14, 18, 19].includes(selectedOption) && (
                   <div className="h-full flex flex-col items-center justify-center opacity-40 text-center">
                     <AlertCircle size={48} className="mb-4" />
                     <p className="text-xl font-bold">MODULE NOT IMPLEMENTED</p>

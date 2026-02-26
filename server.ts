@@ -120,33 +120,104 @@ app.get("/api/sessions", (req, res) => {
 });
 
 app.post("/api/scrape", async (req, res) => {
-  const { phone, groupLink } = req.body;
+  const { phone, groupLink, limit = 0 } = req.body;
   const session = db.prepare("SELECT * FROM sessions WHERE phone = ?").get(phone) as any;
 
   if (!session) return res.status(404).json({ error: "Session not found" });
 
   try {
-    const client = new TelegramClient(new StringSession(session.session_string), session.api_id, session.api_hash, {});
+    const client = new TelegramClient(new StringSession(session.session_string), session.api_id, session.api_hash, {
+      connectionRetries: 5,
+    });
     await client.connect();
 
     const group = await client.getEntity(groupLink);
-    const participants = await client.getParticipants(group);
+    let allParticipants: any[] = [];
     
-    const members = participants.map((p: any) => ({
-      id: p.id.toString(),
-      username: p.username,
-      firstName: p.firstName,
-      lastName: p.lastName,
-    })).filter(m => m.username); // Only keep members with usernames for easier adding
+    // If limit is 0, we try to get as many as possible (Telegram usually caps at 10k for non-admins)
+    const fetchLimit = limit > 0 ? limit : 5000; 
+    
+    // Using iterParticipants for better performance and "unlimited" feel
+    for await (const participant of client.iterParticipants(group, { limit: fetchLimit })) {
+      if (participant.username) {
+        allParticipants.push({
+          id: participant.id.toString(),
+          username: participant.username,
+          firstName: participant.firstName,
+          lastName: participant.lastName,
+        });
+      }
+    }
 
-    return res.json({ success: true, members });
+    return res.json({ success: true, members: allParticipants });
   } catch (error: any) {
+    console.error("Scrape error:", error);
     return res.status(500).json({ error: error.message });
   }
 });
 
 app.post("/api/add-members", async (req, res) => {
-  const { phone, targetGroup, members } = req.body;
+  const { phone, targetGroup, members, delay = 5000 } = req.body;
+  const session = db.prepare("SELECT * FROM sessions WHERE phone = ?").get(phone) as any;
+
+  if (!session) return res.status(404).json({ error: "Session not found" });
+
+  try {
+    const client = new TelegramClient(new StringSession(session.session_string), session.api_id, session.api_hash, {
+      connectionRetries: 5,
+    });
+    await client.connect();
+
+    const target = await client.getEntity(targetGroup);
+    const results: any[] = [];
+    
+    // Professional "Gentle" adding: smaller batches, longer random delays
+    const batchSize = 1; // 1 by 1 is safest to avoid bot detection
+    for (let i = 0; i < members.length; i++) {
+      const username = members[i];
+      try {
+        await client.invoke(new (await import("telegram/tl/index.js")).Api.channels.InviteToChannel({
+          channel: target,
+          users: [username]
+        }));
+        
+        results.push({ username, status: "success" });
+        
+        // Random delay between 5-15 seconds (or user defined) to mimic human behavior
+        const actualDelay = delay + Math.floor(Math.random() * 5000);
+        await new Promise(r => setTimeout(r, actualDelay));
+        
+      } catch (e: any) {
+        results.push({ username, status: "failed", error: e.message });
+        
+        if (e.message.includes("FLOOD_WAIT")) {
+          const waitTime = parseInt(e.message.match(/\d+/)?.[0] || "60");
+          results.push({ system: true, message: `Flood wait detected. Sleeping for ${waitTime} seconds.` });
+          await new Promise(r => setTimeout(r, waitTime * 1000));
+        }
+        
+        if (e.message.includes("PEER_FLOOD") || e.message.includes("USER_PRIVACY_RESTRICTED")) {
+          // Skip these users but continue
+          continue;
+        }
+        
+        // If too many failures, stop to protect account
+        const recentFailures = results.slice(-5).filter(r => r.status === "failed").length;
+        if (recentFailures >= 5) {
+          results.push({ system: true, message: "Too many consecutive failures. Stopping to protect account." });
+          break;
+        }
+      }
+    }
+
+    return res.json({ success: true, results });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/api/spam-check", async (req, res) => {
+  const { phone } = req.body;
   const session = db.prepare("SELECT * FROM sessions WHERE phone = ?").get(phone) as any;
 
   if (!session) return res.status(404).json({ error: "Session not found" });
@@ -154,38 +225,60 @@ app.post("/api/add-members", async (req, res) => {
   try {
     const client = new TelegramClient(new StringSession(session.session_string), session.api_id, session.api_hash, {});
     await client.connect();
-
-    const target = await client.getEntity(targetGroup);
-    const results: any[] = [];
     
-    // Batch adding to increase speed and "limit"
-    const batchSize = 15; // Telegram allows multiple users per call
-    for (let i = 0; i < members.length; i += batchSize) {
-      const batch = members.slice(i, i + batchSize);
-      try {
-        await client.invoke(new (await import("telegram/tl/index.js")).Api.channels.InviteToChannel({
-          channel: target,
-          users: batch
-        }));
-        
-        batch.forEach((username: string) => {
-          results.push({ username, status: "success" });
-        });
-        
-        // Small delay between batches to avoid flood wait
-        if (i + batchSize < members.length) {
-          await new Promise(r => setTimeout(r, 1000));
-        }
-      } catch (e: any) {
-        batch.forEach((username: string) => {
-          results.push({ username, status: "failed", error: e.message });
-        });
-        // If we hit a flood wait, we should probably stop
-        if (e.message.includes("FLOOD_WAIT")) break;
-      }
-    }
+    // Sending a message to @SpamBot is the standard way to check
+    const spamBot = await client.getEntity("SpamBot");
+    await client.sendMessage(spamBot, { message: "/start" });
+    
+    // Wait a bit for reply
+    await new Promise(r => setTimeout(r, 2000));
+    
+    const messages = await client.getMessages(spamBot, { limit: 1 });
+    const status = messages[0]?.message || "No response from SpamBot";
+    
+    return res.json({ success: true, status });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
 
-    return res.json({ success: true, results });
+app.post("/api/send-message", async (req, res) => {
+  const { phone, target, message, delay = 2000 } = req.body;
+  const session = db.prepare("SELECT * FROM sessions WHERE phone = ?").get(phone) as any;
+
+  if (!session) return res.status(404).json({ error: "Session not found" });
+
+  try {
+    const client = new TelegramClient(new StringSession(session.session_string), session.api_id, session.api_hash, {});
+    await client.connect();
+    
+    if (Array.isArray(target)) {
+      const results = [];
+      for (const t of target) {
+        try {
+          await client.sendMessage(t, { message });
+          results.push({ target: t, status: "success" });
+          await new Promise(r => setTimeout(r, delay + Math.floor(Math.random() * 2000)));
+        } catch (e: any) {
+          results.push({ target: t, status: "failed", error: e.message });
+          if (e.message.includes("FLOOD_WAIT")) break;
+        }
+      }
+      return res.json({ success: true, results });
+    } else {
+      await client.sendMessage(target, { message });
+      return res.json({ success: true, message: "Message sent" });
+    }
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/api/auth/logout", async (req, res) => {
+  const { phone } = req.body;
+  try {
+    db.prepare("DELETE FROM sessions WHERE phone = ?").run(phone);
+    return res.json({ success: true, message: "Logged out successfully" });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
