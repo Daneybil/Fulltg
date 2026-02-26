@@ -1,19 +1,14 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ESNext",
+    "module": "CommonJS",
     "moduleResolution": "Node",
-    "lib": ["ESNext", "DOM", "DOM.Iterable"],
-    "allowJs": true,
-    "checkJs": false,
+    "lib": ["ESNext"],
     "strict": true,
     "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "allowImportingTsExtensions": true,
     "outDir": "dist",
-    "noEmitOnError": false,
-    "jsx": "react-jsx"
+    "rootDir": "."
   },
   "include": ["server.ts", "src/**/*"],
   "exclude": ["node_modules"]
