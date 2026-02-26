@@ -154,7 +154,7 @@ app.post("/api/add-members", async (req, res) => {
     await client.connect();
 
     const target = await client.getEntity(targetGroup);
-    const results = [];
+    const results: any[] = [];
     
     // Batch adding to increase speed and "limit"
     const batchSize = 15; // Telegram allows multiple users per call
@@ -166,7 +166,7 @@ app.post("/api/add-members", async (req, res) => {
           users: batch
         }));
         
-        batch.forEach(username => {
+        batch.forEach((username: string) => {
           results.push({ username, status: "success" });
         });
         
@@ -175,7 +175,7 @@ app.post("/api/add-members", async (req, res) => {
           await new Promise(r => setTimeout(r, 1000));
         }
       } catch (e: any) {
-        batch.forEach(username => {
+        batch.forEach((username: string) => {
           results.push({ username, status: "failed", error: e.message });
         });
         // If we hit a flood wait, we should probably stop
