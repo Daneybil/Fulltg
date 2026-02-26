@@ -1,0 +1,5 @@
+sessions.db
+sessions.db-journal
+node_modules
+dist
+.env
