@@ -10,7 +10,8 @@ import fs from "fs";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const db = new Database("sessions.db");
+const dbPath = process.env.VERCEL ? path.join("/tmp", "sessions.db") : "sessions.db";
+const db = new Database(dbPath);
 db.exec(`
   CREATE TABLE IF NOT EXISTS sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -123,19 +124,31 @@ app.post("/api/add-members", async (req, res) => {
 
     const target = await client.getEntity(targetGroup);
     const results = [];
-
-    for (const username of members) {
+    
+    // Batch adding to increase speed and "limit"
+    const batchSize = 15; // Telegram allows multiple users per call
+    for (let i = 0; i < members.length; i += batchSize) {
+      const batch = members.slice(i, i + batchSize);
       try {
-        // Telegram has strict limits. We should add delays here in a real app.
         await client.invoke(new (await import("telegram/tl/index.js")).Api.channels.InviteToChannel({
           channel: target,
-          users: [username]
+          users: batch
         }));
-        results.push({ username, status: "success" });
-        // Add a small delay to avoid instant ban
-        await new Promise(r => setTimeout(r, 2000));
+        
+        batch.forEach(username => {
+          results.push({ username, status: "success" });
+        });
+        
+        // Small delay between batches to avoid flood wait
+        if (i + batchSize < members.length) {
+          await new Promise(r => setTimeout(r, 1000));
+        }
       } catch (e: any) {
-        results.push({ username, status: "failed", error: e.message });
+        batch.forEach(username => {
+          results.push({ username, status: "failed", error: e.message });
+        });
+        // If we hit a flood wait, we should probably stop
+        if (e.message.includes("FLOOD_WAIT")) break;
       }
     }
 
