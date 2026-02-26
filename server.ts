@@ -2,7 +2,6 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
-import Database from "better-sqlite3";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
@@ -10,10 +9,11 @@ import fs from "fs";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const dbPath = process.env.VERCEL ? path.join("/tmp", "sessions.db") : "sessions.db";
+// Resilient Database Initialization for Vercel
 let db: any;
-
 try {
+  const Database = (await import("better-sqlite3")).default;
+  const dbPath = process.env.VERCEL ? path.join("/tmp", "sessions.db") : "sessions.db";
   db = new Database(dbPath);
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
@@ -24,18 +24,24 @@ try {
       api_hash TEXT
     )
   `);
+  console.log("Database initialized successfully at:", dbPath);
 } catch (e) {
-  console.error("Database initialization failed, falling back to in-memory:", e);
-  db = new Database(":memory:");
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS sessions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone TEXT UNIQUE,
-      session_string TEXT,
-      api_id INTEGER,
-      api_hash TEXT
-    )
-  `);
+  console.error("Native Database failed, using in-memory fallback:", e);
+  // Simple Mock DB for Vercel/Serverless environments where native modules might fail
+  const memoryStore = new Map();
+  db = {
+    prepare: (sql: string) => ({
+      run: (...args: any[]) => {
+        if (sql.includes("INSERT")) {
+          memoryStore.set(args[0], { phone: args[0], session_string: args[1], api_id: args[2], api_hash: args[3] });
+        }
+        return { changes: 1 };
+      },
+      all: () => Array.from(memoryStore.values()),
+      get: (phone: string) => memoryStore.get(phone)
+    }),
+    exec: () => {}
+  };
 }
 
 const app = express();
@@ -45,7 +51,6 @@ app.use(express.json());
 app.get("/api/health", (req, res) => {
   res.json({ 
     status: "ok", 
-    dbPath, 
     isVercel: !!process.env.VERCEL,
     nodeVersion: process.version
   });
