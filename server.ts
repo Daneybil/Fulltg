@@ -1,4 +1,5 @@
 import express from "express";
+import cors from "cors";
 import { createServer as createViteServer } from "vite";
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
@@ -45,6 +46,7 @@ try {
 }
 
 const app = express();
+app.use(cors());
 app.use(express.json());
 
 // Health check for debugging

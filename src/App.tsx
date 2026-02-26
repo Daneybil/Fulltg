@@ -15,6 +15,20 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
+const RAILWAY_BACKEND = "https://fulltg-production.up.railway.app";
+
+/**
+ * Safe wrapper around fetch that rewrites /api/... calls
+ */
+async function safeFetch(input: string | Request, init?: RequestInit) {
+  if (typeof input === "string" && input.startsWith("/api/")) {
+    input = RAILWAY_BACKEND + input;
+  } else if (input instanceof Request && input.url.startsWith("/api/")) {
+    input = new Request(RAILWAY_BACKEND + input.url, input);
+  }
+  return fetch(input, init);
+}
+
 type LogEntry = {
   id: string;
   type: "info" | "success" | "error" | "command";
@@ -68,7 +82,7 @@ export default function App() {
 
   const fetchSessions = async () => {
     try {
-      const res = await fetch("/api/sessions");
+      const res = await safeFetch("/api/sessions");
       if (!res.ok) {
         const text = await res.text();
         throw new Error(`Server Error: ${res.status} - ${text.slice(0, 100)}`);
@@ -94,7 +108,7 @@ export default function App() {
     setLoading(true);
     addLog("command", `Sending code to ${phone}...`);
     try {
-      const res = await fetch("/api/auth/send-code", {
+      const res = await safeFetch("/api/auth/send-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone, apiId, apiHash })
@@ -124,7 +138,7 @@ export default function App() {
     setLoading(true);
     addLog("command", "Signing in...");
     try {
-      const res = await fetch("/api/auth/sign-in", {
+      const res = await safeFetch("/api/auth/sign-in", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone, code, apiId, apiHash })
@@ -158,7 +172,7 @@ export default function App() {
     setLoading(true);
     addLog("command", `Scraping members from ${sourceGroup}...`);
     try {
-      const res = await fetch("/api/scrape", {
+      const res = await safeFetch("/api/scrape", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone: selectedSession, groupLink: sourceGroup })
@@ -190,7 +204,7 @@ export default function App() {
     setLoading(true);
     addLog("command", `Adding ${scrapedMembers.length} members to ${targetGroup}...`);
     try {
-      const res = await fetch("/api/add-members", {
+      const res = await safeFetch("/api/add-members", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
