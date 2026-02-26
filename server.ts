@@ -13,7 +13,7 @@ const __dirname = path.dirname(__filename);
 let db: any;
 try {
   const Database = (await import("better-sqlite3")).default;
-  const dbPath = process.env.VERCEL ? path.join("/tmp", "sessions.db") : "sessions.db";
+  const dbPath = "sessions.db";
   db = new Database(dbPath);
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
@@ -49,7 +49,7 @@ app.use(express.json());
 
 // Health check for debugging
 app.get("/api/health", (req, res) => {
-  res.json({ 
+  return res.json({ 
     status: "ok", 
     isVercel: !!process.env.VERCEL,
     nodeVersion: process.version
@@ -78,10 +78,10 @@ app.post("/api/auth/send-code", async (req, res) => {
     );
     
     loginStates.set(phone, { client, phoneCodeHash });
-    res.json({ success: true, message: "Code sent" });
+    return res.json({ success: true, message: "Code sent" });
   } catch (error: any) {
     console.error("Error sending code:", error);
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: error.message });
   }
 });
 
@@ -105,16 +105,16 @@ app.post("/api/auth/sign-in", async (req, res) => {
     db.prepare("INSERT OR REPLACE INTO sessions (phone, session_string, api_id, api_hash) VALUES (?, ?, ?, ?)")
       .run(phone, sessionString, apiId, apiHash);
 
-    res.json({ success: true, message: "Signed in successfully" });
+    return res.json({ success: true, message: "Signed in successfully" });
   } catch (error: any) {
     console.error("Error signing in:", error);
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: error.message });
   }
 });
 
 app.get("/api/sessions", (req, res) => {
   const sessions = db.prepare("SELECT phone, api_id FROM sessions").all();
-  res.json(sessions);
+  return res.json(sessions);
 });
 
 app.post("/api/scrape", async (req, res) => {
@@ -137,9 +137,9 @@ app.post("/api/scrape", async (req, res) => {
       lastName: p.lastName,
     })).filter(m => m.username); // Only keep members with usernames for easier adding
 
-    res.json({ success: true, members });
+    return res.json({ success: true, members });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: error.message });
   }
 });
 
@@ -183,9 +183,9 @@ app.post("/api/add-members", async (req, res) => {
       }
     }
 
-    res.json({ success: true, results });
+    return res.json({ success: true, results });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: error.message });
   }
 });
 
@@ -193,7 +193,7 @@ app.post("/api/add-members", async (req, res) => {
 export default app;
 
 async function startServer() {
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -205,12 +205,9 @@ async function startServer() {
     app.use(express.static(path.join(__dirname, "dist")));
   }
 
-  // Only listen if not running as a serverless function
-  if (!process.env.VERCEL) {
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Server running on http://localhost:${PORT}`);
-    });
-  }
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on port ${PORT}`);
+  });
 }
 
 startServer();
