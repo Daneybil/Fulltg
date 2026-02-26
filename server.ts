@@ -11,19 +11,45 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const dbPath = process.env.VERCEL ? path.join("/tmp", "sessions.db") : "sessions.db";
-const db = new Database(dbPath);
-db.exec(`
-  CREATE TABLE IF NOT EXISTS sessions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    phone TEXT UNIQUE,
-    session_string TEXT,
-    api_id INTEGER,
-    api_hash TEXT
-  )
-`);
+let db: any;
+
+try {
+  db = new Database(dbPath);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone TEXT UNIQUE,
+      session_string TEXT,
+      api_id INTEGER,
+      api_hash TEXT
+    )
+  `);
+} catch (e) {
+  console.error("Database initialization failed, falling back to in-memory:", e);
+  db = new Database(":memory:");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone TEXT UNIQUE,
+      session_string TEXT,
+      api_id INTEGER,
+      api_hash TEXT
+    )
+  `);
+}
 
 const app = express();
 app.use(express.json());
+
+// Health check for debugging
+app.get("/api/health", (req, res) => {
+  res.json({ 
+    status: "ok", 
+    dbPath, 
+    isVercel: !!process.env.VERCEL,
+    nodeVersion: process.version
+  });
+});
 
 // In-memory storage for temporary login states
 const loginStates = new Map<string, { client: TelegramClient; phoneCodeHash: string }>();

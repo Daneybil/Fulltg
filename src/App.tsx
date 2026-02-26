@@ -69,10 +69,14 @@ export default function App() {
   const fetchSessions = async () => {
     try {
       const res = await fetch("/api/sessions");
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Server Error: ${res.status} - ${text.slice(0, 100)}`);
+      }
       const data = await res.json();
       setSessions(data);
-    } catch (e) {
-      addLog("error", "Failed to fetch sessions");
+    } catch (e: any) {
+      addLog("error", `Failed to fetch sessions: ${e.message}`);
     }
   };
 
@@ -95,6 +99,12 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone, apiId, apiHash })
       });
+      
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Server Error: ${res.status} - ${text.slice(0, 100)}`);
+      }
+
       const data = await res.json();
       if (data.success) {
         setStep("code");
@@ -119,6 +129,12 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone, code, apiId, apiHash })
       });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Server Error: ${res.status} - ${text.slice(0, 100)}`);
+      }
+
       const data = await res.json();
       if (data.success) {
         addLog("success", "Successfully logged in and session saved.");
@@ -147,6 +163,12 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone: selectedSession, groupLink: sourceGroup })
       });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Server Error: ${res.status} - ${text.slice(0, 100)}`);
+      }
+
       const data = await res.json();
       if (data.success) {
         setScrapedMembers(data.members);
@@ -177,6 +199,12 @@ export default function App() {
           members: scrapedMembers.map(m => m.username) 
         })
       });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Server Error: ${res.status} - ${text.slice(0, 100)}`);
+      }
+
       const data = await res.json();
       if (data.success) {
         const successCount = data.results.filter((r: any) => r.status === "success").length;
