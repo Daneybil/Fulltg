@@ -386,7 +386,7 @@ app.post("/api/social/scrape", async (req, res) => {
         // 1. Get User ID from Username
         const user = await twitterReadOnly.v2.userByUsername(targetUsername);
         if (!user.data) {
-          return res.status(404).json({ error: "Twitter user not found." });
+          return res.status(404).json({ error: `Twitter user @${targetUsername} not found.` });
         }
 
         // 2. Get Followers
@@ -396,7 +396,7 @@ app.post("/api/social/scrape", async (req, res) => {
         });
 
         if (!followers.data || followers.data.length === 0) {
-          throw new Error("No followers found or API limit reached.");
+          return res.status(404).json({ error: "No followers found for this account or API access restricted." });
         }
 
         const members = followers.data.map(f => ({
@@ -416,11 +416,11 @@ app.post("/api/social/scrape", async (req, res) => {
         });
       } catch (twError: any) {
         console.error("Twitter Scrape Error:", twError);
-        // Fallback to simulation if API fails (e.g. rate limit or tier issues)
-        console.log("Falling back to simulation due to API error...");
+        return res.status(500).json({ error: `Twitter API Error: ${twError.message}. Please check your API keys and rate limits.` });
       }
     }
 
+    // Fallback for other platforms (Facebook, Instagram, TikTok) which are still simulated
     const members = [];
     const scrapeCount = limit === 0 ? 5000 : limit;
     
@@ -474,7 +474,6 @@ app.post("/api/social/add", async (req, res) => {
       try {
         const session = db.prepare("SELECT * FROM social_sessions WHERE platform = ? AND username = ?").get(platform, sessionUser) as any;
         if (session && session.auth_data) {
-          // If auth_data is provided as "token:secret", we can do real following
           const [token, secret] = session.auth_data.split(":");
           if (token && secret) {
             const userClient = new TwitterApi({
@@ -484,22 +483,29 @@ app.post("/api/social/add", async (req, res) => {
               accessSecret: secret,
             });
             
-            const targetUsername = targetProfile.split("/").pop()?.replace("@", "") || "user";
+            // The user wants to "add" the scraped follower to their account.
+            // This means the authenticated user (me) should follow the 'follower' (scraped user).
+            const targetUsername = follower.replace("@", "");
             const targetUser = await twitterReadOnly.v2.userByUsername(targetUsername);
             
             if (targetUser.data) {
               const me = await userClient.v2.me();
               await userClient.v2.follow(me.data.id, targetUser.data.id);
               console.log(`[Twitter] Real Follow: ${sessionUser} followed ${targetUsername}`);
-              return res.json({ success: true, message: `Real Follow: ${sessionUser} followed ${targetUsername} successfully.` });
+              return res.json({ success: true, message: `Real Follow: ${sessionUser} followed @${targetUsername} successfully.` });
+            } else {
+              return res.status(404).json({ error: `Target user @${targetUsername} not found on Twitter.` });
             }
           }
         }
+        return res.status(401).json({ error: "Twitter session not found or invalid. Please reconnect your account." });
       } catch (twError: any) {
         console.error("Twitter Follow Error:", twError);
+        return res.status(500).json({ error: `Twitter Follow Error: ${twError.message}` });
       }
     }
 
+    // Fallback for other platforms (Facebook, Instagram, TikTok) which are still simulated
     console.log(`[${platform}] ${follower} is following ${targetProfile}...`);
 
     // Simulate the "Follow" action with a small randomized delay

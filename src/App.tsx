@@ -440,6 +440,12 @@ export default function App() {
     addLog("info", "Activating stealth protocols... 🕶️");
     
     try {
+      if (socialSessions.length === 0) {
+        addLog("error", "No connected account found. Please connect your account first.");
+        setSocialMode("connect");
+        return;
+      }
+
       for (let i = 0; i < scrapedMembers.length; i++) {
         if (stopRef.current) {
           addLog("info", "Growth process stopped by user.");
@@ -454,7 +460,8 @@ export default function App() {
             platform, 
             targetProfile, 
             follower: member.username,
-            delay: parseInt(addDelay)
+            delay: parseInt(addDelay),
+            username: socialSessions[0].username
           })
         });
 
