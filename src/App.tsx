@@ -21,7 +21,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 
 const RAILWAY_BACKEND = window.location.hostname.includes("vercel.app") 
-  ? "https://ais-dev-dgpejsq6gmooabbeo7mxvl-5552940451.europe-west1.run.app" 
+  ? "https://ais-pre-dgpejsq6gmooabbeo7mxvl-5552940451.europe-west1.run.app" 
   : "";
 
 /**
@@ -36,10 +36,16 @@ async function safeFetch(input: string | Request, init?: RequestInit) {
   
   const finalInput = typeof input === "string" ? url : new Request(url, input);
   
+  console.log(`[Fetch Debug] Attempting to fetch: ${url}`);
+  
   try {
-    return await fetch(finalInput, init);
+    const response = await fetch(finalInput, init);
+    if (!response.ok) {
+      console.warn(`[Fetch Debug] Response not OK: ${response.status} ${response.statusText}`);
+    }
+    return response;
   } catch (e: any) {
-    console.error(`Fetch failed for ${url}:`, e);
+    console.error(`[Fetch Debug] CRITICAL ERROR for ${url}:`, e);
     throw e;
   }
 }
