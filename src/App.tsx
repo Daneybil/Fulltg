@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
-const RAILWAY_BACKEND = "";
+const RAILWAY_BACKEND = window.location.hostname.includes("vercel.app") ? "https://ais-dev-dgpejsq6gmooabbeo7mxvl-5552940451.europe-west1.run.app" : "";
 
 /**
  * Safe wrapper around fetch that rewrites /api/... calls
@@ -102,8 +102,8 @@ export default function App() {
   const [socialLimit, setSocialLimit] = useState("100");
   const [socialMode, setSocialMode] = useState<"scrape" | "add" | "connect">("connect");
   const [socialSessions, setSocialSessions] = useState<any[]>([]);
-  const [socialUsername, setSocialUsername] = useState("");
-  const [socialAuthData, setSocialAuthData] = useState("");
+  const [socialUsername, setSocialUsername] = useState("@TwitterUser");
+  const [socialAuthData, setSocialAuthData] = useState("20277416973804846336-ebqWANHQJfgm3YFHf76j5KF6Xwc8:3uPhmOy91B8pFRH4vvcCDLVrvoqVFvpqIT3gUxm0HMc");
 
   useEffect(() => {
     fetchSessions();
@@ -124,6 +124,11 @@ export default function App() {
       selectedOption === 24 ? 'telegram' : 'instagram';
     try {
       const res = await safeFetch(`/api/social/sessions?platform=${platform}`);
+      const contentType = res.headers.get("content-type");
+      if (!res.ok || !contentType || !contentType.includes("application/json")) {
+        const text = await res.text();
+        throw new Error(`Server Error: ${res.status} - ${text.slice(0, 100)}`);
+      }
       const data = await res.json();
       setSocialSessions(data);
     } catch (e: any) {
@@ -186,12 +191,13 @@ export default function App() {
   const fetchSessions = async () => {
     try {
       const res = await safeFetch("/api/sessions");
-      if (!res.ok) {
+      const contentType = res.headers.get("content-type");
+      if (!res.ok || !contentType || !contentType.includes("application/json")) {
         const text = await res.text();
         throw new Error(`Server Error: ${res.status} - ${text.slice(0, 100)}`);
       }
       const data = await res.json();
-      setSessions(data);
+      setSessions(data || []);
     } catch (e: any) {
       addLog("error", `Failed to fetch sessions: ${e.message}`);
     }

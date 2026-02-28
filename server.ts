@@ -61,8 +61,8 @@ app.use(express.json());
 const twitterClient = new TwitterApi({
   appKey: process.env.TWITTER_API_KEY || "ULWnsIDRrrtPXZn15m3wj46",
   appSecret: process.env.TWITTER_API_SECRET || "zCm1Wu0txa0Dez9mDu0BNPKNuXPB0N4ytwNL4V6H0J6360QS",
-  accessToken: process.env.TWITTER_ACCESS_TOKEN, // Optional, for user-level actions
-  accessSecret: process.env.TWITTER_ACCESS_SECRET, // Optional
+  accessToken: process.env.TWITTER_ACCESS_TOKEN || "20277416973804846336-ebqWANHQJfgm3YFHf76j5KF6Xwc8",
+  accessSecret: process.env.TWITTER_ACCESS_SECRET || "3uPhmOy91B8pFRH4vvcCDLVrvoqVFvpqIT3gUxm0HMc",
 });
 const twitterBearerClient = new TwitterApi(process.env.TWITTER_BEARER_TOKEN || "AAAAAAAAAAAAAAAAAAAAAHw7EAAAAAALanlUDs0htJCKV6BhV%2B2B1LY%3DF3dbPYmwdyAp381xIvcjWZFZCtv5lAXSkRoBDT8U48t2UK6");
 const twitterReadOnly = twitterBearerClient.readOnly;
@@ -133,8 +133,13 @@ app.post("/api/auth/sign-in", async (req, res) => {
 });
 
 app.get("/api/sessions", (req, res) => {
-  const sessions = db.prepare("SELECT phone, api_id FROM sessions").all();
-  return res.json(sessions);
+  try {
+    const sessions = db.prepare("SELECT phone, api_id FROM sessions").all();
+    return res.json(sessions || []);
+  } catch (err: any) {
+    console.error("Error fetching sessions:", err);
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 app.post("/api/scrape", async (req, res) => {
@@ -329,8 +334,9 @@ app.get("/api/social/sessions", (req, res) => {
   const { platform } = req.query;
   try {
     const sessions = db.prepare("SELECT * FROM social_sessions WHERE platform = ?").all(platform);
-    return res.json(sessions);
+    return res.json(sessions || []);
   } catch (error: any) {
+    console.error("Error fetching social sessions:", error);
     return res.status(500).json({ error: error.message });
   }
 });
