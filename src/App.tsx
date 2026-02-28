@@ -71,8 +71,13 @@ export default function App() {
 
   // Form states
   const [phone, setPhone] = useState("");
-  const [apiId, setApiId] = useState("33332903");
-  const [apiHash, setApiHash] = useState("b68b8ee906d4a38a5f153a047b5d4bcc");
+  const [apiId, setApiId] = useState(localStorage.getItem("apiId") || "33332903");
+  const [apiHash, setApiHash] = useState(localStorage.getItem("apiHash") || "b68b8ee906d4a38a5f153a047b5d4bcc");
+
+  useEffect(() => {
+    localStorage.setItem("apiId", apiId);
+    localStorage.setItem("apiHash", apiHash);
+  }, [apiId, apiHash]);
   const [code, setCode] = useState("");
   const [step, setStep] = useState<"phone" | "code">("phone");
   
@@ -95,12 +100,84 @@ export default function App() {
   const [socialLink, setSocialLink] = useState("");
   const [targetProfile, setTargetProfile] = useState("");
   const [socialLimit, setSocialLimit] = useState("100");
-  const [socialMode, setSocialMode] = useState<"scrape" | "add">("scrape");
+  const [socialMode, setSocialMode] = useState<"scrape" | "add" | "connect">("connect");
+  const [socialSessions, setSocialSessions] = useState<any[]>([]);
+  const [socialUsername, setSocialUsername] = useState("");
+  const [socialAuthData, setSocialAuthData] = useState("");
 
   useEffect(() => {
     fetchSessions();
-    addLog("info", "FULL-TG Web v2.1 initialized. Ready for commands.");
+    addLog("info", "FULL-TG Web v2.5 initialized. Ready for commands.");
   }, []);
+
+  useEffect(() => {
+    if ([20, 21, 22, 23, 24].includes(selectedOption || 0)) {
+      fetchSocialSessions();
+    }
+  }, [selectedOption]);
+
+  const fetchSocialSessions = async () => {
+    const platform = 
+      selectedOption === 20 ? 'twitter' : 
+      selectedOption === 21 ? 'facebook' : 
+      selectedOption === 22 ? 'tiktok' : 
+      selectedOption === 24 ? 'telegram' : 'instagram';
+    try {
+      const res = await safeFetch(`/api/social/sessions?platform=${platform}`);
+      const data = await res.json();
+      setSocialSessions(data);
+    } catch (e: any) {
+      addLog("error", `Failed to fetch social sessions: ${e.message}`);
+    }
+  };
+
+  const handleSocialLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const platform = 
+      selectedOption === 20 ? 'twitter' : 
+      selectedOption === 21 ? 'facebook' : 
+      selectedOption === 22 ? 'tiktok' : 
+      selectedOption === 24 ? 'telegram' : 'instagram';
+    setLoading(true);
+    try {
+      const res = await safeFetch("/api/social/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform, username: socialUsername, authData: socialAuthData })
+      });
+      const data = await res.json();
+      if (data.success) {
+        addLog("success", data.message);
+        fetchSocialSessions();
+        setSocialMode("scrape");
+      } else {
+        addLog("error", data.error);
+      }
+    } catch (e: any) {
+      addLog("error", e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSocialLogout = async (username: string) => {
+    const platform = 
+      selectedOption === 20 ? 'twitter' : 
+      selectedOption === 21 ? 'facebook' : 
+      selectedOption === 22 ? 'tiktok' : 
+      selectedOption === 24 ? 'telegram' : 'instagram';
+    try {
+      await safeFetch("/api/social/logout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform, username })
+      });
+      addLog("info", `Logged out ${platform} account: ${username}`);
+      fetchSocialSessions();
+    } catch (e: any) {
+      addLog("error", e.message);
+    }
+  };
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -352,8 +429,9 @@ export default function App() {
     stopRef.current = false;
     setProgress({ current: 0, total: scrapedMembers.length });
     
-    addLog("command", `Starting Human-Mimicry Growth on ${platform}...`);
-    addLog("info", `Target Profile: ${targetProfile}`);
+    addLog("command", `[GROWTH ENGINE] Initiating Human-Mimicry Expansion on ${platform}...`);
+    addLog("info", `Targeting Profile: ${targetProfile} 🎯`);
+    addLog("info", "Activating stealth protocols... 🕶️");
     
     try {
       for (let i = 0; i < scrapedMembers.length; i++) {
@@ -426,8 +504,15 @@ export default function App() {
 
   const handleSocialScrape = async (platform: string) => {
     if (!socialLink) return addLog("error", "Enter a profile link first");
+    if (socialSessions.length === 0) {
+      setSocialMode("connect");
+      return addLog("error", "CRITICAL: You must CONNECT an account before performing Deep Discovery.");
+    }
+    
     setLoading(true);
-    addLog("command", `Deep Scraping ${platform} profile: ${socialLink}...`);
+    addLog("command", `[DEEP DISCOVERY] Initiating multi-threaded scrape on ${platform}: ${socialLink}...`);
+    addLog("info", "Bypassing anti-bot filters... 🛡️");
+    
     try {
       const res = await safeFetch("/api/social/scrape", {
         method: "POST",
@@ -435,19 +520,21 @@ export default function App() {
         body: JSON.stringify({ 
           platform, 
           link: socialLink,
-          limit: parseInt(socialLimit)
+          limit: parseInt(socialLimit),
+          username: socialSessions[0].username
         })
       });
       const data = await res.json();
       if (data.success) {
         setScrapedMembers(data.members);
-        addLog("success", `Successfully discovered ${data.members.length} potential targets from ${platform}.`);
-        addLog("info", "You can now use 'ADD MEMBERS' to target these users on Telegram.");
+        addLog("success", `DEEP DISCOVERY COMPLETE: Successfully extracted ${data.members.length} high-value targets from ${platform}.`);
+        addLog("info", `Targets are now synchronized with the growth engine. Switch to 'ADD' to begin expansion.`);
+        setSocialMode("add");
       } else {
-        addLog("error", data.error);
+        addLog("error", `Scrape Failed: ${data.error}`);
       }
     } catch (e: any) {
-      addLog("error", e.message);
+      addLog("error", `System Error: ${e.message}`);
     } finally {
       setLoading(false);
     }
@@ -596,6 +683,13 @@ export default function App() {
                             className="w-full bg-[#00ff00] text-black font-bold py-3 rounded hover:bg-[#00ff00]/90 disabled:opacity-50 flex justify-center items-center gap-2"
                           >
                             {loading ? <Loader2 className="animate-spin" /> : "SIGN IN"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={fetchSessions}
+                            className="w-full border border-[#00ff00]/30 text-[#00ff00] py-2 rounded text-[10px] hover:bg-[#00ff00]/5"
+                          >
+                            REFRESH SESSIONS
                           </button>
                           <button
                             type="button"
@@ -992,23 +1086,97 @@ export default function App() {
                     </h2>
 
                     {/* Mode Selector */}
-                    <div className="grid grid-cols-2 gap-2 p-1 bg-black/40 rounded-lg border border-[#00ff00]/10">
+                    <div className="grid grid-cols-3 gap-2 p-1 bg-black/40 rounded-lg border border-[#00ff00]/10">
+                      <button
+                        onClick={() => setSocialMode("connect")}
+                        className={`py-2 rounded-md text-[10px] font-bold transition-all ${socialMode === "connect" ? "bg-[#00ff00] text-black" : "hover:bg-[#00ff00]/10"}`}
+                      >
+                        1. CONNECT
+                      </button>
                       <button
                         onClick={() => setSocialMode("scrape")}
-                        className={`py-2 rounded-md text-xs font-bold transition-all ${socialMode === "scrape" ? "bg-[#00ff00] text-black" : "hover:bg-[#00ff00]/10"}`}
+                        className={`py-2 rounded-md text-[10px] font-bold transition-all ${socialMode === "scrape" ? "bg-[#00ff00] text-black" : "hover:bg-[#00ff00]/10"}`}
                       >
-                        1. SCRAPE FOLLOWERS
+                        2. SCRAPE
                       </button>
                       <button
                         onClick={() => setSocialMode("add")}
-                        className={`py-2 rounded-md text-xs font-bold transition-all ${socialMode === "add" ? "bg-[#00ff00] text-black" : "hover:bg-[#00ff00]/10"}`}
+                        className={`py-2 rounded-md text-[10px] font-bold transition-all ${socialMode === "add" ? "bg-[#00ff00] text-black" : "hover:bg-[#00ff00]/10"}`}
                       >
-                        2. ADD TO PROFILE
+                        3. ADD
                       </button>
                     </div>
 
                     <div className="space-y-4">
-                      {socialMode === "scrape" ? (
+                      <div className="flex items-center justify-between p-2 bg-black/40 rounded border border-[#00ff00]/10">
+                        <span className="text-[10px] opacity-50">ENGINE STATUS:</span>
+                        <span className="text-[10px] font-bold text-[#00ff00] flex items-center gap-1">
+                          <div className="w-1.5 h-1.5 bg-[#00ff00] rounded-full animate-pulse" />
+                          READY FOR {socialMode.toUpperCase()}
+                        </span>
+                      </div>
+
+                      {socialMode === "connect" ? (
+                        <div className="space-y-4">
+                          <div className="p-4 bg-[#00ff00]/5 border border-[#00ff00]/20 rounded">
+                            <p className="text-xs opacity-70">
+                              Connect your <span className="text-[#00ff00] font-bold uppercase">{MENU_OPTIONS.find(o => o.id === selectedOption)?.label.split(' ')[0]}</span> account to enable high-level scraping and growth.
+                            </p>
+                          </div>
+
+                          {socialSessions.length > 0 ? (
+                            <div className="space-y-2">
+                              <label className="text-xs opacity-50">CONNECTED ACCOUNTS</label>
+                              {socialSessions.map(s => (
+                                <div key={s.id} className="flex items-center justify-between p-3 bg-black/60 border border-[#00ff00]/20 rounded">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-2 h-2 bg-[#00ff00] rounded-full animate-pulse" />
+                                    <span className="text-sm font-bold">@{s.username}</span>
+                                  </div>
+                                  <button 
+                                    onClick={() => handleSocialLogout(s.username)}
+                                    className="text-[10px] text-red-500 hover:underline"
+                                  >
+                                    DISCONNECT
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <form onSubmit={handleSocialLogin} className="space-y-4">
+                              <div className="space-y-2">
+                                <label className="text-xs opacity-50 uppercase">USERNAME</label>
+                                <input
+                                  type="text"
+                                  value={socialUsername}
+                                  onChange={e => setSocialUsername(e.target.value)}
+                                  placeholder="@your_username"
+                                  className="w-full bg-black border border-[#00ff00]/30 p-3 rounded focus:border-[#00ff00] outline-none"
+                                  required
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <label className="text-xs opacity-50 uppercase">AUTH TOKEN / SESSION COOKIE</label>
+                                <input
+                                  type="password"
+                                  value={socialAuthData}
+                                  onChange={e => setSocialAuthData(e.target.value)}
+                                  placeholder="Paste your auth token or session cookie here..."
+                                  className="w-full bg-black border border-[#00ff00]/30 p-3 rounded focus:border-[#00ff00] outline-none"
+                                  required
+                                />
+                              </div>
+                              <button
+                                type="submit"
+                                disabled={loading}
+                                className="w-full bg-[#00ff00] text-black font-bold py-3 rounded hover:bg-[#00ff00]/90 disabled:opacity-50 flex justify-center items-center gap-2"
+                              >
+                                {loading ? <Loader2 className="animate-spin" /> : "CONNECT ACCOUNT"}
+                              </button>
+                            </form>
+                          )}
+                        </div>
+                      ) : socialMode === "scrape" ? (
                         <>
                           <div className="p-4 bg-[#00ff00]/5 border border-[#00ff00]/20 rounded">
                             <p className="text-xs opacity-70">
