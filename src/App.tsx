@@ -20,34 +20,18 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
-const RAILWAY_BACKEND = window.location.hostname.includes("vercel.app") 
-  ? "https://ais-pre-dgpejsq6gmooabbeo7mxvl-5552940451.europe-west1.run.app" 
-  : "";
+const RAILWAY_BACKEND = "https://fulltg-production.up.railway.app";
 
 /**
  * Safe wrapper around fetch that rewrites /api/... calls
  */
 async function safeFetch(input: string | Request, init?: RequestInit) {
-  let url = typeof input === "string" ? input : input.url;
-  
-  if (url.startsWith("/api/")) {
-    url = RAILWAY_BACKEND + url;
+  if (typeof input === "string" && input.startsWith("/api/")) {
+    input = RAILWAY_BACKEND + input;
+  } else if (input instanceof Request && input.url.startsWith("/api/")) {
+    input = new Request(RAILWAY_BACKEND + input.url, input);
   }
-  
-  const finalInput = typeof input === "string" ? url : new Request(url, input);
-  
-  console.log(`[Fetch Debug] Attempting to fetch: ${url}`);
-  
-  try {
-    const response = await fetch(finalInput, init);
-    if (!response.ok) {
-      console.warn(`[Fetch Debug] Response not OK: ${response.status} ${response.statusText}`);
-    }
-    return response;
-  } catch (e: any) {
-    console.error(`[Fetch Debug] CRITICAL ERROR for ${url}:`, e);
-    throw e;
-  }
+  return fetch(input, init);
 }
 
 type LogEntry = {
