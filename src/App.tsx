@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
-const RAILWAY_BACKEND = "https://fulltg-production.up.railway.app";
+const RAILWAY_BACKEND = "";
 
 /**
  * Safe wrapper around fetch that rewrites /api/... calls
@@ -1156,12 +1156,14 @@ export default function App() {
                                 />
                               </div>
                               <div className="space-y-2">
-                                <label className="text-xs opacity-50 uppercase">AUTH TOKEN / SESSION COOKIE</label>
+                                <label className="text-xs opacity-50 uppercase">
+                                  {selectedOption === 20 ? "ACCESS TOKEN : ACCESS SECRET" : "AUTH TOKEN / SESSION COOKIE"}
+                                </label>
                                 <input
                                   type="password"
                                   value={socialAuthData}
                                   onChange={e => setSocialAuthData(e.target.value)}
-                                  placeholder="Paste your auth token or session cookie here..."
+                                  placeholder={selectedOption === 20 ? "token:secret" : "Paste your auth token or session cookie here..."}
                                   className="w-full bg-black border border-[#00ff00]/30 p-3 rounded focus:border-[#00ff00] outline-none"
                                   required
                                 />
