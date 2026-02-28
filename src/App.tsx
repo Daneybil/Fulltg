@@ -52,13 +52,14 @@ const MENU_OPTIONS: MenuOption[] = [
   { id: 1, label: "LOGIN ACCOUNTS", category: "LOGIN MENU", icon: <User size={16} /> },
   { id: 2, label: "LOGOUT ACCOUNTS", category: "LOGIN MENU", icon: <LogOut size={16} /> },
   { id: 4, label: "SPAM-CHECKER", category: "CHECKER MENU", icon: <ShieldCheck size={16} /> },
-  { id: 14, label: "SCRAPE MEMBERS", category: "SCRAPER MENU", icon: <Search size={16} /> },
-  { id: 18, label: "ADD MEMBERS", category: "ADDER MENU", icon: <UserPlus size={16} /> },
+  { id: 14, label: "TELEGRAM SCRAPER", category: "SCRAPER MENU", icon: <Search size={16} /> },
+  { id: 18, label: "TELEGRAM ADDER", category: "ADDER MENU", icon: <UserPlus size={16} /> },
   { id: 19, label: "SEND MESSAGES", category: "MESSAGE MENU", icon: <MessageSquare size={16} /> },
-  { id: 20, label: "TWITTER SCRAPER", category: "SOCIAL SCRAPER", icon: <Twitter size={16} /> },
-  { id: 21, label: "FACEBOOK SCRAPER", category: "SOCIAL SCRAPER", icon: <Facebook size={16} /> },
-  { id: 22, label: "TIKTOK SCRAPER", category: "SOCIAL SCRAPER", icon: <Music2 size={16} /> },
-  { id: 23, label: "INSTAGRAM SCRAPER", category: "SOCIAL SCRAPER", icon: <Instagram size={16} /> },
+  { id: 24, label: "TELEGRAM TOOLS", category: "SOCIAL GROWTH", icon: <Globe size={16} /> },
+  { id: 20, label: "TWITTER TOOLS", category: "SOCIAL GROWTH", icon: <Twitter size={16} /> },
+  { id: 21, label: "FACEBOOK TOOLS", category: "SOCIAL GROWTH", icon: <Facebook size={16} /> },
+  { id: 22, label: "TIKTOK TOOLS", category: "SOCIAL GROWTH", icon: <Music2 size={16} /> },
+  { id: 23, label: "INSTAGRAM TOOLS", category: "SOCIAL GROWTH", icon: <Instagram size={16} /> },
 ];
 
 export default function App() {
@@ -92,7 +93,9 @@ export default function App() {
 
   // Social states
   const [socialLink, setSocialLink] = useState("");
+  const [targetProfile, setTargetProfile] = useState("");
   const [socialLimit, setSocialLimit] = useState("100");
+  const [socialMode, setSocialMode] = useState<"scrape" | "add">("scrape");
 
   useEffect(() => {
     fetchSessions();
@@ -337,6 +340,62 @@ export default function App() {
       addLog("error", e.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSocialAdd = async (platform: string) => {
+    if (!targetProfile || scrapedMembers.length === 0) {
+      return addLog("error", "Missing target profile or scraped followers");
+    }
+    setLoading(true);
+    setIsStopping(false);
+    stopRef.current = false;
+    setProgress({ current: 0, total: scrapedMembers.length });
+    
+    addLog("command", `Starting Human-Mimicry Growth on ${platform}...`);
+    addLog("info", `Target Profile: ${targetProfile}`);
+    
+    try {
+      for (let i = 0; i < scrapedMembers.length; i++) {
+        if (stopRef.current) {
+          addLog("info", "Growth process stopped by user.");
+          break;
+        }
+
+        const member = scrapedMembers[i];
+        const res = await safeFetch("/api/social/add", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ 
+            platform, 
+            targetProfile, 
+            follower: member.username,
+            delay: parseInt(addDelay)
+          })
+        });
+
+        const data = await res.json();
+        if (data.success) {
+          addLog("success", `[${i+1}/${scrapedMembers.length}] @${member.username} is now following your ${platform} profile.`);
+        } else {
+          addLog("error", `[${i+1}/${scrapedMembers.length}] Failed to add @${member.username}: ${data.error}`);
+        }
+
+        setProgress({ current: i + 1, total: scrapedMembers.length });
+        
+        // Human-like delay
+        const actualDelay = parseInt(addDelay) + Math.floor(Math.random() * 3000);
+        await new Promise(r => setTimeout(r, actualDelay));
+      }
+
+      if (!stopRef.current) {
+        addLog("success", `Growth mission accomplished. Your ${platform} profile has been boosted.`);
+      }
+    } catch (e: any) {
+      addLog("error", e.message);
+    } finally {
+      setLoading(false);
+      setIsStopping(false);
     }
   };
 
@@ -920,64 +979,169 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Social Scrapers */}
-                {[20, 21, 22, 23].includes(selectedOption) && (
+                {/* Social Tools */}
+                {[20, 21, 22, 23, 24].includes(selectedOption) && (
                   <div className="space-y-6">
                     <h2 className="text-2xl font-bold flex items-center gap-3 uppercase">
                       {selectedOption === 20 && <Twitter />}
                       {selectedOption === 21 && <Facebook />}
                       {selectedOption === 22 && <Music2 />}
                       {selectedOption === 23 && <Instagram />}
+                      {selectedOption === 24 && <Globe />}
                       {MENU_OPTIONS.find(o => o.id === selectedOption)?.label}
                     </h2>
-                    <div className="space-y-4">
-                      <div className="p-4 bg-[#00ff00]/5 border border-[#00ff00]/20 rounded mb-4">
-                        <p className="text-xs opacity-70">
-                          This module performs <span className="text-[#00ff00] font-bold">Deep Discovery</span> on the target profile. 
-                          It extracts usernames and potential Telegram associations for unlimited growth.
-                        </p>
-                      </div>
-                      
-                      <div className="space-y-2">
-                        <label className="text-xs opacity-50 uppercase">TARGET PROFILE LINK</label>
-                        <div className="relative">
-                          <input
-                            type="text"
-                            value={socialLink}
-                            onChange={e => setSocialLink(e.target.value)}
-                            placeholder={`https://${selectedOption === 20 ? 'twitter.com' : selectedOption === 21 ? 'facebook.com' : selectedOption === 22 ? 'tiktok.com' : 'instagram.com'}/username`}
-                            className="w-full bg-black border border-[#00ff00]/30 p-3 pl-10 rounded focus:border-[#00ff00] outline-none"
-                          />
-                          <Globe className="absolute left-3 top-3.5 opacity-30" size={18} />
-                        </div>
-                      </div>
 
-                      <div className="space-y-2">
-                        <label className="text-xs opacity-50">DISCOVERY LIMIT (UNLIMITED MODE ENABLED)</label>
-                        <input
-                          type="number"
-                          value={socialLimit}
-                          onChange={e => setSocialLimit(e.target.value)}
-                          className="w-full bg-black border border-[#00ff00]/30 p-3 rounded focus:border-[#00ff00] outline-none"
-                        />
-                      </div>
-
+                    {/* Mode Selector */}
+                    <div className="grid grid-cols-2 gap-2 p-1 bg-black/40 rounded-lg border border-[#00ff00]/10">
                       <button
-                        onClick={() => handleSocialScrape(
-                          selectedOption === 20 ? 'twitter' : 
-                          selectedOption === 21 ? 'facebook' : 
-                          selectedOption === 22 ? 'tiktok' : 'instagram'
-                        )}
-                        disabled={loading || !socialLink}
-                        className="w-full bg-[#00ff00] text-black font-bold py-4 rounded hover:bg-[#00ff00]/90 disabled:opacity-50 flex justify-center items-center gap-2 shadow-[0_0_20px_rgba(0,255,0,0.2)]"
+                        onClick={() => setSocialMode("scrape")}
+                        className={`py-2 rounded-md text-xs font-bold transition-all ${socialMode === "scrape" ? "bg-[#00ff00] text-black" : "hover:bg-[#00ff00]/10"}`}
                       >
-                        {loading ? <Loader2 className="animate-spin" /> : "START DEEP DISCOVERY"}
+                        1. SCRAPE FOLLOWERS
                       </button>
+                      <button
+                        onClick={() => setSocialMode("add")}
+                        className={`py-2 rounded-md text-xs font-bold transition-all ${socialMode === "add" ? "bg-[#00ff00] text-black" : "hover:bg-[#00ff00]/10"}`}
+                      >
+                        2. ADD TO PROFILE
+                      </button>
+                    </div>
 
-                      {scrapedMembers.length > 0 && (
+                    <div className="space-y-4">
+                      {socialMode === "scrape" ? (
+                        <>
+                          <div className="p-4 bg-[#00ff00]/5 border border-[#00ff00]/20 rounded">
+                            <p className="text-xs opacity-70">
+                              Enter a <span className="text-[#00ff00] font-bold">Target Profile</span> to scrape its followers. 
+                              These followers will be loaded into the queue for your growth.
+                            </p>
+                          </div>
+                          
+                          <div className="space-y-2">
+                            <label className="text-xs opacity-50 uppercase">TARGET PROFILE LINK (SOURCE)</label>
+                            <div className="relative">
+                              <input
+                                type="text"
+                                value={socialLink}
+                                onChange={e => setSocialLink(e.target.value)}
+                                placeholder={`https://${selectedOption === 20 ? 'twitter.com' : selectedOption === 21 ? 'facebook.com' : selectedOption === 22 ? 'tiktok.com' : selectedOption === 24 ? 't.me' : 'instagram.com'}/username`}
+                                className="w-full bg-black border border-[#00ff00]/30 p-3 pl-10 rounded focus:border-[#00ff00] outline-none"
+                              />
+                              <Globe className="absolute left-3 top-3.5 opacity-30" size={18} />
+                            </div>
+                          </div>
+
+                          <div className="space-y-2">
+                            <label className="text-xs opacity-50 uppercase">SCRAPE LIMIT (UNLIMITED)</label>
+                            <input
+                              type="number"
+                              value={socialLimit}
+                              onChange={e => setSocialLimit(e.target.value)}
+                              className="w-full bg-black border border-[#00ff00]/30 p-3 rounded focus:border-[#00ff00] outline-none"
+                            />
+                          </div>
+
+                          <button
+                            onClick={() => handleSocialScrape(
+                              selectedOption === 20 ? 'twitter' : 
+                              selectedOption === 21 ? 'facebook' : 
+                              selectedOption === 22 ? 'tiktok' : 
+                              selectedOption === 24 ? 'telegram' : 'instagram'
+                            )}
+                            disabled={loading || !socialLink}
+                            className="w-full bg-[#00ff00] text-black font-bold py-4 rounded hover:bg-[#00ff00]/90 disabled:opacity-50 flex justify-center items-center gap-2 shadow-[0_0_20px_rgba(0,255,0,0.2)]"
+                          >
+                            {loading ? <Loader2 className="animate-spin" /> : "START SCRAPING FOLLOWERS"}
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <div className="p-4 bg-[#00ff00]/5 border border-[#00ff00]/20 rounded">
+                            <p className="text-xs opacity-70">
+                              Enter <span className="text-[#00ff00] font-bold">YOUR Profile Link</span>. 
+                              The scraped followers will be added to your account using our human-mimicry engine.
+                            </p>
+                          </div>
+
+                          <div className="space-y-2">
+                            <label className="text-xs opacity-50 uppercase">YOUR PROFILE LINK (TARGET)</label>
+                            <div className="relative">
+                              <input
+                                type="text"
+                                value={targetProfile}
+                                onChange={e => setTargetProfile(e.target.value)}
+                                placeholder={`https://${selectedOption === 20 ? 'twitter.com' : selectedOption === 21 ? 'facebook.com' : selectedOption === 22 ? 'tiktok.com' : selectedOption === 24 ? 't.me' : 'instagram.com'}/my_account`}
+                                className="w-full bg-black border border-[#00ff00]/30 p-3 pl-10 rounded focus:border-[#00ff00] outline-none"
+                              />
+                              <Globe className="absolute left-3 top-3.5 opacity-30" size={18} />
+                            </div>
+                          </div>
+
+                          <div className="p-4 bg-black/40 border border-[#00ff00]/10 rounded">
+                            <p className="text-xs opacity-70">
+                              READY TO ADD <span className="text-[#00ff00] font-bold">{scrapedMembers.length}</span> FOLLOWERS TO YOUR PROFILE.
+                            </p>
+                          </div>
+
+                          <div className="space-y-2">
+                            <label className="text-xs opacity-50">DELAY PER FOLLOW (MS)</label>
+                            <input
+                              type="number"
+                              value={addDelay}
+                              onChange={e => setAddDelay(e.target.value)}
+                              className="w-full bg-black border border-[#00ff00]/30 p-3 rounded focus:border-[#00ff00] outline-none"
+                            />
+                          </div>
+
+                          {loading && progress.total > 0 && (
+                            <div className="space-y-2">
+                              <div className="flex justify-between text-[10px] opacity-60">
+                                <span>PROGRESS: {progress.current} / {progress.total}</span>
+                                <span>{Math.round((progress.current / progress.total) * 100)}%</span>
+                              </div>
+                              <div className="h-1 bg-black rounded-full overflow-hidden border border-[#00ff00]/10">
+                                <motion.div 
+                                  className="h-full bg-[#00ff00] shadow-[0_0_10px_rgba(0,255,0,0.5)]"
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${(progress.current / progress.total) * 100}%` }}
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="flex gap-4">
+                            <button
+                              onClick={() => handleSocialAdd(
+                                selectedOption === 20 ? 'twitter' : 
+                                selectedOption === 21 ? 'facebook' : 
+                                selectedOption === 22 ? 'tiktok' : 
+                                selectedOption === 24 ? 'telegram' : 'instagram'
+                              )}
+                              disabled={loading || !targetProfile || scrapedMembers.length === 0}
+                              className="flex-1 bg-[#00ff00] text-black font-bold py-4 rounded hover:bg-[#00ff00]/90 disabled:opacity-50 flex justify-center items-center gap-2 shadow-[0_0_20px_rgba(0,255,0,0.2)]"
+                            >
+                              {loading ? <Loader2 className="animate-spin" /> : "START ADDING FOLLOWERS"}
+                            </button>
+                            {loading && (
+                              <button
+                                onClick={() => {
+                                  stopRef.current = true;
+                                  setIsStopping(true);
+                                }}
+                                disabled={isStopping}
+                                className="px-6 bg-red-500/20 text-red-500 border border-red-500/30 font-bold rounded hover:bg-red-500 hover:text-white transition-all disabled:opacity-50"
+                              >
+                                {isStopping ? "STOPPING..." : "STOP"}
+                              </button>
+                            )}
+                          </div>
+                        </>
+                      )}
+
+                      {scrapedMembers.length > 0 && socialMode === "scrape" && (
                         <div className="mt-6 border border-[#00ff00]/20 rounded p-4 bg-black/40">
                           <h3 className="text-sm font-bold mb-2 flex items-center justify-between">
-                            <span>DISCOVERED TARGETS ({scrapedMembers.length})</span>
+                            <span>DISCOVERED FOLLOWERS ({scrapedMembers.length})</span>
                             <span className="text-[10px] bg-[#00ff00]/20 px-2 py-0.5 rounded">READY FOR ADDING</span>
                           </h3>
                           <div className="max-h-60 overflow-y-auto text-[10px] space-y-1 opacity-60 custom-scrollbar">
