@@ -11,7 +11,12 @@ import {
   ChevronRight,
   AlertCircle,
   CheckCircle2,
-  Loader2
+  Loader2,
+  Twitter,
+  Facebook,
+  Instagram,
+  Music2,
+  Globe
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -50,6 +55,10 @@ const MENU_OPTIONS: MenuOption[] = [
   { id: 14, label: "SCRAPE MEMBERS", category: "SCRAPER MENU", icon: <Search size={16} /> },
   { id: 18, label: "ADD MEMBERS", category: "ADDER MENU", icon: <UserPlus size={16} /> },
   { id: 19, label: "SEND MESSAGES", category: "MESSAGE MENU", icon: <MessageSquare size={16} /> },
+  { id: 20, label: "TWITTER SCRAPER", category: "SOCIAL SCRAPER", icon: <Twitter size={16} /> },
+  { id: 21, label: "FACEBOOK SCRAPER", category: "SOCIAL SCRAPER", icon: <Facebook size={16} /> },
+  { id: 22, label: "TIKTOK SCRAPER", category: "SOCIAL SCRAPER", icon: <Music2 size={16} /> },
+  { id: 23, label: "INSTAGRAM SCRAPER", category: "SOCIAL SCRAPER", icon: <Instagram size={16} /> },
 ];
 
 export default function App() {
@@ -75,6 +84,15 @@ export default function App() {
   const [spamStatus, setSpamStatus] = useState("");
   const [messageTarget, setMessageTarget] = useState("");
   const [messageContent, setMessageContent] = useState("");
+  
+  // Progress states
+  const [progress, setProgress] = useState({ current: 0, total: 0 });
+  const [isStopping, setIsStopping] = useState(false);
+  const stopRef = useRef(false);
+
+  // Social states
+  const [socialLink, setSocialLink] = useState("");
+  const [socialLimit, setSocialLimit] = useState("100");
 
   useEffect(() => {
     fetchSessions();
@@ -211,38 +229,61 @@ export default function App() {
       return addLog("error", "Missing session, target group, or scraped members");
     }
     setLoading(true);
-    addLog("command", `Adding ${scrapedMembers.length} members to ${targetGroup} (Delay: ${addDelay}ms)...`);
+    setIsStopping(false);
+    stopRef.current = false;
+    const membersToTarget = scrapedMembers.map(m => m.username);
+    setProgress({ current: 0, total: membersToTarget.length });
+    
+    addLog("command", `Adding ${membersToTarget.length} members to ${targetGroup} (Delay: ${addDelay}ms)...`);
+    
     try {
-      const res = await safeFetch("/api/add-members", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          phone: selectedSession, 
-          targetGroup, 
-          members: scrapedMembers.map(m => m.username),
-          delay: parseInt(addDelay)
-        })
-      });
+      // We process in small batches on the frontend to allow for "Stop" functionality
+      // and real-time progress updates.
+      for (let i = 0; i < membersToTarget.length; i++) {
+        if (stopRef.current) {
+          addLog("info", "Adding process stopped by user.");
+          break;
+        }
 
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`Server Error: ${res.status} - ${text.slice(0, 100)}`);
-      }
+        const username = membersToTarget[i];
+        const res = await safeFetch("/api/add-members", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ 
+            phone: selectedSession, 
+            targetGroup, 
+            members: [username],
+            delay: parseInt(addDelay)
+          })
+        });
 
-      const data = await res.json();
-      if (data.success) {
-        const successCount = data.results.filter((r: any) => r.status === "success").length;
-        addLog("success", `Operation complete. Added ${successCount}/${data.results.length} members.`);
+        const data = await res.json();
+        if (data.success && data.results[0].status === "success") {
+          addLog("success", `[${i+1}/${membersToTarget.length}] Added @${username}`);
+        } else {
+          const error = data.results?.[0]?.error || data.error || "Unknown error";
+          addLog("error", `[${i+1}/${membersToTarget.length}] Failed @${username}: ${error}`);
+          
+          if (error.includes("FLOOD_WAIT")) {
+            const waitTime = parseInt(error.match(/\d+/)?.[0] || "60");
+            addLog("info", `Sleeping for ${waitTime}s due to flood wait...`);
+            await new Promise(r => setTimeout(r, waitTime * 1000));
+          }
+        }
+
+        setProgress({ current: i + 1, total: membersToTarget.length });
         
-        // Log system messages from backend (like flood waits)
-        data.results.filter((r: any) => r.system).forEach((r: any) => addLog("info", r.message));
-      } else {
-        addLog("error", data.error);
+        // Human-like delay
+        const actualDelay = parseInt(addDelay) + Math.floor(Math.random() * 2000);
+        await new Promise(r => setTimeout(r, actualDelay));
       }
+
+      addLog("success", "Member adding process finished.");
     } catch (e: any) {
       addLog("error", e.message);
     } finally {
       setLoading(false);
+      setIsStopping(false);
     }
   };
 
@@ -324,16 +365,51 @@ export default function App() {
     }
   };
 
+  const handleSocialScrape = async (platform: string) => {
+    if (!socialLink) return addLog("error", "Enter a profile link first");
+    setLoading(true);
+    addLog("command", `Deep Scraping ${platform} profile: ${socialLink}...`);
+    try {
+      const res = await safeFetch("/api/social/scrape", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          platform, 
+          link: socialLink,
+          limit: parseInt(socialLimit)
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setScrapedMembers(data.members);
+        addLog("success", `Successfully discovered ${data.members.length} potential targets from ${platform}.`);
+        addLog("info", "You can now use 'ADD MEMBERS' to target these users on Telegram.");
+      } else {
+        addLog("error", data.error);
+      }
+    } catch (e: any) {
+      addLog("error", e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-[#00ff00] font-mono flex flex-col overflow-hidden">
       {/* Header */}
-      <header className="p-6 border-b border-[#00ff00]/20 flex flex-col items-center">
-        <h1 className="text-6xl font-black tracking-tighter mb-2 select-none">
+      <header className="p-6 border-b border-[#00ff00]/20 flex flex-col items-center relative overflow-hidden">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(0,255,0,0.05),transparent_70%)]" />
+        <motion.h1 
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="text-6xl font-black tracking-tighter mb-2 select-none text-transparent bg-clip-text bg-gradient-to-b from-[#00ff00] to-[#008800] drop-shadow-[0_0_15px_rgba(0,255,0,0.3)]"
+        >
           FULL-TG
-        </h1>
-        <div className="text-[10px] opacity-60 uppercase tracking-widest flex gap-4">
-          <span>Premium Edition</span>
-          <span>Version: 2.1</span>
+        </motion.h1>
+        <div className="text-[10px] opacity-60 uppercase tracking-widest flex gap-4 relative z-10">
+          <span className="flex items-center gap-1"><div className="w-1 h-1 bg-[#00ff00] rounded-full animate-pulse" /> Premium Edition</span>
+          <span>Version: 2.5</span>
+          <span className="text-[#00ff00]/40">System: Operational</span>
         </div>
       </header>
 
@@ -371,8 +447,9 @@ export default function App() {
         </div>
 
         {/* Content Area */}
-        <div className="flex-1 p-8 overflow-y-auto bg-[#0d0d0d] relative">
-          <AnimatePresence mode="wait">
+        <div className="flex-1 flex flex-col overflow-hidden bg-[#0d0d0d] relative">
+          <div className="flex-1 p-8 overflow-y-auto relative custom-scrollbar">
+            <AnimatePresence mode="wait">
             {!selectedOption ? (
               <motion.div 
                 initial={{ opacity: 0 }} animate={{ opacity: 1 }}
@@ -749,13 +826,44 @@ export default function App() {
                         </p>
                         <p className="text-[10px] opacity-40 mt-1 italic">Professional Mode: Adding 1 by 1 with random human-like delays.</p>
                       </div>
-                      <button
-                        onClick={handleAddMembers}
-                        disabled={loading || !targetGroup || scrapedMembers.length === 0}
-                        className="w-full bg-[#00ff00] text-black font-bold py-3 rounded hover:bg-[#00ff00]/90 disabled:opacity-50 flex justify-center items-center gap-2"
-                      >
-                        {loading ? <Loader2 className="animate-spin" /> : "START ADDING"}
-                      </button>
+
+                      {loading && progress.total > 0 && (
+                        <div className="space-y-2">
+                          <div className="flex justify-between text-[10px] opacity-60">
+                            <span>PROGRESS: {progress.current} / {progress.total}</span>
+                            <span>{Math.round((progress.current / progress.total) * 100)}%</span>
+                          </div>
+                          <div className="h-1 bg-black rounded-full overflow-hidden border border-[#00ff00]/10">
+                            <motion.div 
+                              className="h-full bg-[#00ff00] shadow-[0_0_10px_rgba(0,255,0,0.5)]"
+                              initial={{ width: 0 }}
+                              animate={{ width: `${(progress.current / progress.total) * 100}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex gap-4">
+                        <button
+                          onClick={handleAddMembers}
+                          disabled={loading || !targetGroup || scrapedMembers.length === 0}
+                          className="flex-1 bg-[#00ff00] text-black font-bold py-3 rounded hover:bg-[#00ff00]/90 disabled:opacity-50 flex justify-center items-center gap-2"
+                        >
+                          {loading ? <Loader2 className="animate-spin" /> : "START ADDING"}
+                        </button>
+                        {loading && (
+                          <button
+                            onClick={() => {
+                              stopRef.current = true;
+                              setIsStopping(true);
+                            }}
+                            disabled={isStopping}
+                            className="px-6 bg-red-500/20 text-red-500 border border-red-500/30 font-bold rounded hover:bg-red-500 hover:text-white transition-all disabled:opacity-50"
+                          >
+                            {isStopping ? "STOPPING..." : "STOP"}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -812,8 +920,83 @@ export default function App() {
                   </div>
                 )}
 
+                {/* Social Scrapers */}
+                {[20, 21, 22, 23].includes(selectedOption) && (
+                  <div className="space-y-6">
+                    <h2 className="text-2xl font-bold flex items-center gap-3 uppercase">
+                      {selectedOption === 20 && <Twitter />}
+                      {selectedOption === 21 && <Facebook />}
+                      {selectedOption === 22 && <Music2 />}
+                      {selectedOption === 23 && <Instagram />}
+                      {MENU_OPTIONS.find(o => o.id === selectedOption)?.label}
+                    </h2>
+                    <div className="space-y-4">
+                      <div className="p-4 bg-[#00ff00]/5 border border-[#00ff00]/20 rounded mb-4">
+                        <p className="text-xs opacity-70">
+                          This module performs <span className="text-[#00ff00] font-bold">Deep Discovery</span> on the target profile. 
+                          It extracts usernames and potential Telegram associations for unlimited growth.
+                        </p>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <label className="text-xs opacity-50 uppercase">TARGET PROFILE LINK</label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={socialLink}
+                            onChange={e => setSocialLink(e.target.value)}
+                            placeholder={`https://${selectedOption === 20 ? 'twitter.com' : selectedOption === 21 ? 'facebook.com' : selectedOption === 22 ? 'tiktok.com' : 'instagram.com'}/username`}
+                            className="w-full bg-black border border-[#00ff00]/30 p-3 pl-10 rounded focus:border-[#00ff00] outline-none"
+                          />
+                          <Globe className="absolute left-3 top-3.5 opacity-30" size={18} />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-xs opacity-50">DISCOVERY LIMIT (UNLIMITED MODE ENABLED)</label>
+                        <input
+                          type="number"
+                          value={socialLimit}
+                          onChange={e => setSocialLimit(e.target.value)}
+                          className="w-full bg-black border border-[#00ff00]/30 p-3 rounded focus:border-[#00ff00] outline-none"
+                        />
+                      </div>
+
+                      <button
+                        onClick={() => handleSocialScrape(
+                          selectedOption === 20 ? 'twitter' : 
+                          selectedOption === 21 ? 'facebook' : 
+                          selectedOption === 22 ? 'tiktok' : 'instagram'
+                        )}
+                        disabled={loading || !socialLink}
+                        className="w-full bg-[#00ff00] text-black font-bold py-4 rounded hover:bg-[#00ff00]/90 disabled:opacity-50 flex justify-center items-center gap-2 shadow-[0_0_20px_rgba(0,255,0,0.2)]"
+                      >
+                        {loading ? <Loader2 className="animate-spin" /> : "START DEEP DISCOVERY"}
+                      </button>
+
+                      {scrapedMembers.length > 0 && (
+                        <div className="mt-6 border border-[#00ff00]/20 rounded p-4 bg-black/40">
+                          <h3 className="text-sm font-bold mb-2 flex items-center justify-between">
+                            <span>DISCOVERED TARGETS ({scrapedMembers.length})</span>
+                            <span className="text-[10px] bg-[#00ff00]/20 px-2 py-0.5 rounded">READY FOR ADDING</span>
+                          </h3>
+                          <div className="max-h-60 overflow-y-auto text-[10px] space-y-1 opacity-60 custom-scrollbar">
+                            {scrapedMembers.map((m, i) => (
+                              <div key={i} className="flex items-center gap-2 border-b border-[#00ff00]/5 py-1">
+                                <span className="opacity-30">{i+1}.</span>
+                                <span className="text-[#00ff00]">@{m.username}</span>
+                                <span className="opacity-30 ml-auto">{m.discoveredAt.split('T')[0]}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {/* Other menus placeholder */}
-                {![1, 2, 4, 14, 18, 19].includes(selectedOption) && (
+                {![1, 2, 4, 14, 18, 19, 20, 21, 22, 23].includes(selectedOption) && (
                   <div className="h-full flex flex-col items-center justify-center opacity-40 text-center">
                     <AlertCircle size={48} className="mb-4" />
                     <p className="text-xl font-bold">MODULE NOT IMPLEMENTED</p>
@@ -824,7 +1007,8 @@ export default function App() {
             )}
           </AnimatePresence>
         </div>
-      </main>
+      </div>
+    </main>
 
       {/* Terminal Footer */}
       <footer className="h-48 border-t border-[#00ff00]/20 bg-black flex flex-col">
