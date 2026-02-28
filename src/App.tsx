@@ -20,18 +20,28 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
-const RAILWAY_BACKEND = window.location.hostname.includes("vercel.app") ? "https://ais-dev-dgpejsq6gmooabbeo7mxvl-5552940451.europe-west1.run.app" : "";
+const RAILWAY_BACKEND = window.location.hostname.includes("vercel.app") 
+  ? "https://ais-dev-dgpejsq6gmooabbeo7mxvl-5552940451.europe-west1.run.app" 
+  : "";
 
 /**
  * Safe wrapper around fetch that rewrites /api/... calls
  */
 async function safeFetch(input: string | Request, init?: RequestInit) {
-  if (typeof input === "string" && input.startsWith("/api/")) {
-    input = RAILWAY_BACKEND + input;
-  } else if (input instanceof Request && input.url.startsWith("/api/")) {
-    input = new Request(RAILWAY_BACKEND + input.url, input);
+  let url = typeof input === "string" ? input : input.url;
+  
+  if (url.startsWith("/api/")) {
+    url = RAILWAY_BACKEND + url;
   }
-  return fetch(input, init);
+  
+  const finalInput = typeof input === "string" ? url : new Request(url, input);
+  
+  try {
+    return await fetch(finalInput, init);
+  } catch (e: any) {
+    console.error(`Fetch failed for ${url}:`, e);
+    throw e;
+  }
 }
 
 type LogEntry = {
@@ -102,7 +112,7 @@ export default function App() {
   const [socialLimit, setSocialLimit] = useState("100");
   const [socialMode, setSocialMode] = useState<"scrape" | "add" | "connect">("connect");
   const [socialSessions, setSocialSessions] = useState<any[]>([]);
-  const [socialUsername, setSocialUsername] = useState("@TwitterUser");
+  const [socialUsername, setSocialUsername] = useState("Oil_aramco9699");
   const [socialAuthData, setSocialAuthData] = useState("20277416973804846336-ebqWANHQJfgm3YFHf76j5KF6Xwc8:3uPhmOy91B8pFRH4vvcCDLVrvoqVFvpqIT3gUxm0HMc");
 
   useEffect(() => {
