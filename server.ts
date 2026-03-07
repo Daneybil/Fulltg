@@ -74,7 +74,7 @@ const twitterClient = new TwitterApi({
   accessToken: process.env.TWITTER_ACCESS_TOKEN || "20277416973804846336-ebqWANHQJfgm3YFHf76j5KF6Xwc8",
   accessSecret: process.env.TWITTER_ACCESS_SECRET || "3uPhmOy91B8pFRH4vvcCDLVrvoqVFvpqIT3gUxm0HMc",
 });
-const twitterBearerClient = new TwitterApi(process.env.TWITTER_BEARER_TOKEN || "AAAAAAAAAAAAAAAAAAAAAHw7EAAAAAALanlUDs0htJCKV6BhV%2B2B1LY%3DF3dbPYmwdyAp381xIvcjWZFZCtv5lAXSkRoBDT8U48t2UK6");
+const twitterBearerClient = new TwitterApi(process.env.TWITTER_BEARER_TOKEN || "AAAAAAAAAAAAAAAAAAAAAHw7EAAAAAALanlUDs0htJCKV6BhV+2B1LY=F3dbPYmwdyAp381xIvcjWZFZCtv5lAXSkRoBDT8U48t2UK6");
 const twitterReadOnly = twitterBearerClient.readOnly;
 
 // Health check for debugging
@@ -385,20 +385,24 @@ app.post("/api/social/scrape", async (req, res) => {
         
         // 1. Get User ID from Username
         const user = await twitterReadOnly.v2.userByUsername(targetUsername);
+        console.log(`[Twitter] Target User ID found: ${user.data?.id}`);
         if (!user.data) {
           return res.status(404).json({ error: `Twitter user @${targetUsername} not found.` });
         }
 
         // 2. Get Followers
+        console.log(`[Twitter] Fetching followers for ${user.data.id} (Limit: ${limit})...`);
         const followers = await twitterReadOnly.v2.followers(user.data.id, {
           max_results: Math.min(limit, 1000), // API limit per request
           "user.fields": ["username", "name", "id"]
         });
 
         if (!followers.data || followers.data.length === 0) {
+          console.log(`[Twitter] No followers found for ${targetUsername}`);
           return res.status(404).json({ error: "No followers found for this account or API access restricted." });
         }
 
+        console.log(`[Twitter] Successfully scraped ${followers.data.length} followers.`);
         const members = followers.data.map(f => ({
           id: f.id,
           username: f.username,
@@ -472,6 +476,7 @@ app.post("/api/social/add", async (req, res) => {
     
     if (platform === 'twitter' && sessionUser) {
       try {
+        console.log(`[Twitter] Real Follow initiated by ${sessionUser} targeting @${follower}...`);
         const session = db.prepare("SELECT * FROM social_sessions WHERE platform = ? AND username = ?").get(platform, sessionUser) as any;
         if (session && session.auth_data) {
           const [token, secret] = session.auth_data.split(":");
@@ -483,21 +488,24 @@ app.post("/api/social/add", async (req, res) => {
               accessSecret: secret,
             });
             
-            // The user wants to "add" the scraped follower to their account.
-            // This means the authenticated user (me) should follow the 'follower' (scraped user).
             const targetUsername = follower.replace("@", "");
+            console.log(`[Twitter] Looking up target user: ${targetUsername}`);
             const targetUser = await twitterReadOnly.v2.userByUsername(targetUsername);
             
             if (targetUser.data) {
               const me = await userClient.v2.me();
+              console.log(`[Twitter] Authenticated as: ${me.data.username} (${me.data.id})`);
+              console.log(`[Twitter] Executing follow action: ${me.data.id} -> ${targetUser.data.id}`);
               await userClient.v2.follow(me.data.id, targetUser.data.id);
-              console.log(`[Twitter] Real Follow: ${sessionUser} followed ${targetUsername}`);
+              console.log(`[Twitter] Real Follow SUCCESS: ${sessionUser} followed ${targetUsername}`);
               return res.json({ success: true, message: `Real Follow: ${sessionUser} followed @${targetUsername} successfully.` });
             } else {
+              console.log(`[Twitter] Target user @${targetUsername} not found.`);
               return res.status(404).json({ error: `Target user @${targetUsername} not found on Twitter.` });
             }
           }
         }
+        console.log(`[Twitter] Session not found for ${sessionUser}`);
         return res.status(401).json({ error: "Twitter session not found or invalid. Please reconnect your account." });
       } catch (twError: any) {
         console.error("Twitter Follow Error:", twError);

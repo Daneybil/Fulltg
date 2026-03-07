@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
-const RAILWAY_BACKEND = "https://fulltg-production.up.railway.app";
+const RAILWAY_BACKEND = "";
 
 /**
  * Safe wrapper around fetch that rewrites /api/... calls
