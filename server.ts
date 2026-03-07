@@ -161,6 +161,11 @@ app.post("/api/scrape", async (req, res) => {
   try {
     const client = new TelegramClient(new StringSession(session.session_string), session.api_id, session.api_hash, {
       connectionRetries: 5,
+      deviceModel: "iPhone 15 Pro Max",
+      systemVersion: "17.4.1",
+      appVersion: "10.9.1",
+      langCode: "en",
+      systemLangCode: "en-US"
     });
     await client.connect();
 
@@ -206,6 +211,11 @@ app.post("/api/add-members", async (req, res) => {
   try {
     const client = new TelegramClient(new StringSession(session.session_string), session.api_id, session.api_hash, {
       connectionRetries: 5,
+      deviceModel: "iPhone 15 Pro Max",
+      systemVersion: "17.4.1",
+      appVersion: "10.9.1",
+      langCode: "en",
+      systemLangCode: "en-US"
     });
     await client.connect();
 
@@ -264,7 +274,13 @@ app.post("/api/spam-check", async (req, res) => {
   if (!session) return res.status(404).json({ error: "Session not found" });
 
   try {
-    const client = new TelegramClient(new StringSession(session.session_string), session.api_id, session.api_hash, {});
+    const client = new TelegramClient(new StringSession(session.session_string), session.api_id, session.api_hash, {
+      deviceModel: "iPhone 15 Pro Max",
+      systemVersion: "17.4.1",
+      appVersion: "10.9.1",
+      langCode: "en",
+      systemLangCode: "en-US"
+    });
     await client.connect();
     
     // Sending a message to @SpamBot is the standard way to check
@@ -290,7 +306,13 @@ app.post("/api/send-message", async (req, res) => {
   if (!session) return res.status(404).json({ error: "Session not found" });
 
   try {
-    const client = new TelegramClient(new StringSession(session.session_string), session.api_id, session.api_hash, {});
+    const client = new TelegramClient(new StringSession(session.session_string), session.api_id, session.api_hash, {
+      deviceModel: "iPhone 15 Pro Max",
+      systemVersion: "17.4.1",
+      appVersion: "10.9.1",
+      langCode: "en",
+      systemLangCode: "en-US"
+    });
     await client.connect();
     
     if (Array.isArray(target)) {
@@ -383,8 +405,25 @@ app.post("/api/social/scrape", async (req, res) => {
       try {
         console.log(`[Twitter] Real Scraping initiated by ${sessionUser} on ${targetUsername}...`);
         
+        // Use user-level client if session exists, otherwise fallback to bearer
+        let activeClient = twitterReadOnly;
+        const session = db.prepare("SELECT * FROM social_sessions WHERE platform = ? AND username = ?").get(platform, sessionUser) as any;
+        
+        if (session && session.auth_data) {
+          const [token, secret] = session.auth_data.split(":");
+          if (token && secret) {
+            console.log(`[Twitter] Using user-level authentication for scraping...`);
+            activeClient = new TwitterApi({
+              appKey: process.env.TWITTER_API_KEY || "ULWnsIDRrrtPXZn15m3wj46",
+              appSecret: process.env.TWITTER_API_SECRET || "zCm1Wu0txa0Dez9mDu0BNPKNuXPB0N4ytwNL4V6H0J6360QS",
+              accessToken: token,
+              accessSecret: secret,
+            }).readOnly;
+          }
+        }
+
         // 1. Get User ID from Username
-        const user = await twitterReadOnly.v2.userByUsername(targetUsername);
+        const user = await activeClient.v2.userByUsername(targetUsername);
         console.log(`[Twitter] Target User ID found: ${user.data?.id}`);
         if (!user.data) {
           return res.status(404).json({ error: `Twitter user @${targetUsername} not found.` });
@@ -392,7 +431,7 @@ app.post("/api/social/scrape", async (req, res) => {
 
         // 2. Get Followers
         console.log(`[Twitter] Fetching followers for ${user.data.id} (Limit: ${limit})...`);
-        const followers = await twitterReadOnly.v2.followers(user.data.id, {
+        const followers = await activeClient.v2.followers(user.data.id, {
           max_results: Math.min(limit, 1000), // API limit per request
           "user.fields": ["username", "name", "id"]
         });

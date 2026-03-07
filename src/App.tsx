@@ -86,7 +86,7 @@ export default function App() {
   const [scrapedMembers, setScrapedMembers] = useState<any[]>([]);
   const [selectedSession, setSelectedSession] = useState("");
   const [scrapeLimit, setScrapeLimit] = useState("5000");
-  const [addDelay, setAddDelay] = useState("5000");
+  const [addDelay, setAddDelay] = useState("1000"); // Faster default delay as requested
   const [spamStatus, setSpamStatus] = useState("");
   const [messageTarget, setMessageTarget] = useState("");
   const [messageContent, setMessageContent] = useState("");
