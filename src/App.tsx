@@ -103,7 +103,7 @@ export default function App() {
   const [socialMode, setSocialMode] = useState<"scrape" | "add" | "connect">("connect");
   const [socialSessions, setSocialSessions] = useState<any[]>([]);
   const [socialUsername, setSocialUsername] = useState("Oil_aramco9699");
-  const [socialAuthData, setSocialAuthData] = useState("20277416973804846336-ebqWANHQJfgm3YFHf76j5KF6Xwc8:3uPhmOy91B8pFRH4vvcCDLVrvoqVFvpqIT3gUxm0HMc");
+  const [socialAuthData, setSocialAuthData] = useState("2027741697304846336-TUDztC4ZRTQoI0K7uiU96tK0tHVJme:ZDn6gxCofl5vHmkgHv7mrdVflp1NguoubV9qOKedhjwBN");
 
   useEffect(() => {
     fetchSessions();

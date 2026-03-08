@@ -71,8 +71,8 @@ app.use((req, res, next) => {
 const twitterClient = new TwitterApi({
   appKey: process.env.TWITTER_API_KEY || "ULWnsIDRrrtPXZn15m3wj46",
   appSecret: process.env.TWITTER_API_SECRET || "zCm1Wu0txa0Dez9mDu0BNPKNuXPB0N4ytwNL4V6H0J6360QS",
-  accessToken: process.env.TWITTER_ACCESS_TOKEN || "20277416973804846336-ebqWANHQJfgm3YFHf76j5KF6Xwc8",
-  accessSecret: process.env.TWITTER_ACCESS_SECRET || "3uPhmOy91B8pFRH4vvcCDLVrvoqVFvpqIT3gUxm0HMc",
+  accessToken: process.env.TWITTER_ACCESS_TOKEN || "2027741697304846336-TUDztC4ZRTQoI0K7uiU96tK0tHVJme",
+  accessSecret: process.env.TWITTER_ACCESS_SECRET || "ZDn6gxCofl5vHmkgHv7mrdVflp1NguoubV9qOKedhjwBN",
 });
 const twitterBearerClient = new TwitterApi(process.env.TWITTER_BEARER_TOKEN || "AAAAAAAAAAAAAAAAAAAAAHw7EAAAAAALanlUDs0htJCKV6BhV+2B1LY=F3dbPYmwdyAp381xIvcjWZFZCtv5lAXSkRoBDT8U48t2UK6");
 const twitterReadOnly = twitterBearerClient.readOnly;
