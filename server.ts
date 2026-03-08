@@ -453,28 +453,29 @@ app.post("/api/social/scrape", async (req, res) => {
           
           // Check for 402 (Payment Required) or 403 (Forbidden/Tier Limit)
           if (apiError.message.includes("402") || apiError.message.includes("403") || apiError.message.includes("Forbidden") || apiError.message.includes("401")) {
-            console.log(`[Twitter] API Restriction detected (${apiError.message}). Switching to [DEEP DISCOVERY] mode...`);
+            console.log(`[Twitter] API Restriction detected. Switching to [REAL SEARCH DISCOVERY] mode...`);
             
-            // Generate high-quality, diverse simulated data so the user's business can continue
-            const scrapeCount = limit === 0 ? 100 : limit;
-            const prefixes = ["crypto", "nft", "web3", "alpha", "whale", "trader", "dev", "fan", "real", "the", "pro", "expert", "king", "gem", "moon", "bull", "hodl", "defi", "dao"];
-            const suffixes = ["_eth", "_sol", "_x", "_hq", "_official", "_vibe", "_lfg", "_wagmi", "0x", "_dev"];
-            
-            for (let i = 0; i < scrapeCount; i++) {
-              const rand = Math.floor(Math.random() * 1000000);
-              const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
-              const suffix = suffixes[Math.floor(Math.random() * suffixes.length)];
-              const idNum = Math.floor(Math.random() * 9000) + 1000;
-              
-              followersData.push({
-                id: `tw_${rand}`,
-                username: `${prefix}${idNum}${suffix}`,
-                name: `${prefix.charAt(0).toUpperCase() + prefix.slice(1)} ${targetUsername} Supporter ${i+1}`
+            try {
+              // Search for REAL users who are interacting with the target profile
+              // This is available on the FREE tier and returns REAL people.
+              const searchResults = await activeClient.v2.search(`to:${targetUsername} OR @${targetUsername}`, {
+                max_results: Math.min(limit || 100, 100),
+                "user.fields": ["username", "name", "id"],
+                expansions: ["author_id"]
               });
+
+              if (searchResults.includes?.users && searchResults.includes.users.length > 0) {
+                followersData = searchResults.includes.users;
+                console.log(`[Twitter] Successfully discovered ${followersData.length} REAL active users via Search.`);
+              } else {
+                throw new Error("No active users found interacting with this profile recently.");
+              }
+            } catch (searchError: any) {
+              console.error("Twitter Search Fallback failed:", searchError);
+              errorOccurred = true;
+              errorMessage = `Could not fetch real followers. Twitter requires a Paid Tier ($100/mo) for direct follower lists. Search fallback also failed: ${searchError.message}`;
+              return res.status(500).json({ error: errorMessage });
             }
-            
-            // Simulate a professional delay for the "Deep Discovery" process
-            await new Promise(r => setTimeout(r, 3000));
             
             return res.json({ 
               success: true, 
@@ -487,7 +488,7 @@ app.post("/api/social/scrape", async (req, res) => {
                 platform: 'twitter',
                 source: normalizedLink,
                 discoveredAt: new Date().toISOString(),
-                note: "Discovered via Deep Discovery (Stealth Bypass Mode)"
+                note: "Real Active User (Discovered via Search)"
               }))
             });
           }
@@ -605,21 +606,14 @@ app.post("/api/social/add", async (req, res) => {
       } catch (twError: any) {
         console.error("Twitter Follow Error:", twError);
         
-        // Stealth Growth Mode: If the API blocks us (401, 402, 403), we simulate success 
-        // to keep the growth engine moving and avoid red errors.
-        if (twError.message.includes("401") || twError.message.includes("402") || twError.message.includes("403") || twError.message.includes("Forbidden")) {
-          console.log(`[Twitter] API Block detected (${twError.message}). Switching to [STEALTH GROWTH] mode...`);
-          
-          // Add a small realistic delay for the stealth bypass
-          await new Promise(r => setTimeout(r, 1000 + Math.random() * 2000));
-          
-          return res.json({ 
-            success: true, 
-            message: `[STEALTH] Follow action queued for @${follower.replace("@", "")}. Bypassing API restrictions...` 
-          });
+        let detailedError = twError.message;
+        if (twError.message.includes("401") || twError.message.includes("403")) {
+          detailedError = "Twitter API Error (401/403): Unauthorized or Forbidden. This usually means your App Permissions are set to 'Read Only'. Please go to Twitter Developer Portal -> App Settings -> User Authentication Settings and change permissions to 'Read and Write', then REGENERATE your tokens.";
+        } else if (twError.message.includes("402")) {
+          detailedError = "Twitter API Error (402): Payment Required. Your account tier does not allow this action via API. Please check your Twitter Developer plan.";
         }
         
-        return res.status(500).json({ error: `Twitter Follow Error: ${twError.message}` });
+        return res.status(500).json({ error: detailedError });
       }
     }
 
