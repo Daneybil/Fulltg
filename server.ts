@@ -69,8 +69,8 @@ app.use((req, res, next) => {
 
 // Initialize Twitter Client
 const twitterClient = new TwitterApi({
-  appKey: process.env.TWITTER_API_KEY || "ULWnsIDRrrtPXZn15m3wj46",
-  appSecret: process.env.TWITTER_API_SECRET || "zCm1Wu0txa0Dez9mDu0BNPKNuXPB0N4ytwNL4V6H0J6360QS",
+  appKey: process.env.TWITTER_API_KEY || "9EcqI6nnIEeEb5CSTM54pTTFz",
+  appSecret: process.env.TWITTER_API_SECRET || "us4u2QerMmBGfqN29NAjeUz1aAb29VuhvZXMsSdj75rH570vzV",
   accessToken: process.env.TWITTER_ACCESS_TOKEN || "2027741697304846336-TUDztC4ZRTQoI0K7uiU96tK0tHVJme",
   accessSecret: process.env.TWITTER_ACCESS_SECRET || "ZDn6gxCofl5vHmkgHv7mrdVflp1NguoubV9qOKedhjwBN",
 });
@@ -414,8 +414,8 @@ app.post("/api/social/scrape", async (req, res) => {
           if (token && secret) {
             console.log(`[Twitter] Using user-level authentication for scraping...`);
             activeClient = new TwitterApi({
-              appKey: process.env.TWITTER_API_KEY || "ULWnsIDRrrtPXZn15m3wj46",
-              appSecret: process.env.TWITTER_API_SECRET || "zCm1Wu0txa0Dez9mDu0BNPKNuXPB0N4ytwNL4V6H0J6360QS",
+              appKey: process.env.TWITTER_API_KEY || "9EcqI6nnIEeEb5CSTM54pTTFz",
+              appSecret: process.env.TWITTER_API_SECRET || "us4u2QerMmBGfqN29NAjeUz1aAb29VuhvZXMsSdj75rH570vzV",
               accessToken: token,
               accessSecret: secret,
             }).readOnly;
@@ -521,8 +521,8 @@ app.post("/api/social/add", async (req, res) => {
           const [token, secret] = session.auth_data.split(":");
           if (token && secret) {
             const userClient = new TwitterApi({
-              appKey: process.env.TWITTER_API_KEY || "ULWnsIDRrrtPXZn15m3wj46",
-              appSecret: process.env.TWITTER_API_SECRET || "zCm1Wu0txa0Dez9mDu0BNPKNuXPB0N4ytwNL4V6H0J6360QS",
+              appKey: process.env.TWITTER_API_KEY || "9EcqI6nnIEeEb5CSTM54pTTFz",
+              appSecret: process.env.TWITTER_API_SECRET || "us4u2QerMmBGfqN29NAjeUz1aAb29VuhvZXMsSdj75rH570vzV",
               accessToken: token,
               accessSecret: secret,
             });
