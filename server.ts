@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { createServer as createViteServer } from "vite";
-import { TelegramClient } from "telegram";
+import { TelegramClient, Api } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
 import { TwitterApi } from "twitter-api-v2";
 import path from "path";
@@ -520,6 +520,63 @@ app.post("/api/social/scrape", async (req, res) => {
       }
     }
 
+    if (platform === 'telegram') {
+      try {
+        console.log(`[Telegram] Real Scraping initiated by ${sessionUser} on ${normalizedLink}...`);
+        
+        const session = db.prepare("SELECT * FROM sessions WHERE phone = ?").get(sessionUser) as any;
+        if (!session) {
+          return res.status(401).json({ error: "Telegram session not found. Please connect your account first." });
+        }
+
+        const client = new TelegramClient(
+          new StringSession(session.session_string),
+          session.api_id,
+          session.api_hash,
+          {
+            connectionRetries: 5,
+            deviceModel: "iPhone 15 Pro Max",
+            systemVersion: "iOS 17.4.1",
+            appVersion: "10.9.1",
+          }
+        );
+
+        await client.connect();
+        
+        // Resolve the group/channel
+        const target = await client.getEntity(normalizedLink);
+        console.log(`[Telegram] Target resolved: ${target.id}`);
+
+        // Fetch participants
+        const participants = await client.getParticipants(target, {
+          limit: Math.min(limit || 100, 1000)
+        });
+
+        const membersList = participants
+          .filter(p => p.username) // Only those with usernames
+          .map(p => ({
+            id: p.id.toString(),
+            username: p.username,
+            platform: 'telegram',
+            source: normalizedLink,
+            discoveredAt: new Date().toISOString()
+          }));
+
+        await client.disconnect();
+
+        return res.json({ 
+          success: true, 
+          platform, 
+          source: normalizedLink,
+          count: membersList.length,
+          members: membersList 
+        });
+      } catch (tgError: any) {
+        console.error("Telegram Scrape Error:", tgError);
+        return res.status(500).json({ error: `Telegram Error: ${tgError.message}` });
+      }
+    }
+
     // Fallback for other platforms (Facebook, Instagram, TikTok) which are still simulated
     const members = [];
     const scrapeCount = limit === 0 ? 5000 : limit;
@@ -570,6 +627,69 @@ app.post("/api/social/add", async (req, res) => {
     // This module simulates the process of a user following the target profile.
     // It includes randomized delays and system checks to ensure safety.
     
+    if (platform === 'telegram' && sessionUser) {
+      try {
+        console.log(`[Telegram] Real Add initiated by ${sessionUser} targeting ${follower}...`);
+        
+        const session = db.prepare("SELECT * FROM sessions WHERE phone = ?").get(sessionUser) as any;
+        if (!session) {
+          return res.status(401).json({ error: "Telegram session not found. Please connect your account first." });
+        }
+
+        const client = new TelegramClient(
+          new StringSession(session.session_string),
+          session.api_id,
+          session.api_hash,
+          {
+            connectionRetries: 5,
+            deviceModel: "iPhone 15 Pro Max",
+            systemVersion: "iOS 17.4.1",
+            appVersion: "10.9.1",
+          }
+        );
+
+        await client.connect();
+
+        // Resolve target group and user
+        const targetGroup = await client.getEntity(targetProfile);
+        const targetUser = await client.getEntity(follower);
+
+        // Human-Mimicry Delay: Randomized between 15 and 45 seconds
+        const humanDelay = Math.floor(Math.random() * (45000 - 15000 + 1)) + 15000;
+        console.log(`[Telegram] Human-Mimicry Delay: Waiting ${Math.round(humanDelay/1000)}s before adding...`);
+        await new Promise(r => setTimeout(r, humanDelay));
+
+        // Perform the add
+        await client.invoke(
+          new Api.channels.InviteToChannel({
+            channel: targetGroup,
+            users: [targetUser],
+          })
+        );
+
+        console.log(`[Telegram] Successfully added ${follower} to ${targetProfile}`);
+        await client.disconnect();
+
+        return res.json({ 
+          success: true, 
+          message: `Successfully added @${follower} to the group.` 
+        });
+      } catch (tgError: any) {
+        console.error("Telegram Add Error:", tgError);
+        
+        let detailedError = tgError.message;
+        if (tgError.message.includes("FLOOD_WAIT")) {
+          detailedError = "Telegram Anti-Spam: Flood Wait detected. Please wait a few hours before adding more members to avoid a ban.";
+        } else if (tgError.message.includes("USER_PRIVACY_RESTRICTED")) {
+          detailedError = "Privacy Settings: This user does not allow being added to groups.";
+        } else if (tgError.message.includes("PEER_ID_INVALID")) {
+          detailedError = "Invalid Target: Could not find the user or group. Please check the links.";
+        }
+        
+        return res.status(500).json({ error: detailedError });
+      }
+    }
+
     if (platform === 'twitter' && sessionUser) {
       try {
         console.log(`[Twitter] Real Follow initiated by ${sessionUser} targeting @${follower}...`);
