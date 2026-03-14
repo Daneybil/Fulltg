@@ -88,6 +88,7 @@ export default function App() {
   const [selectedSession, setSelectedSession] = useState("");
   const [selectedSessions, setSelectedSessions] = useState<string[]>([]);
   const [isTurboMode, setIsTurboMode] = useState(false);
+  const [isFastMode, setIsFastMode] = useState(false);
   const [scrapeLimit, setScrapeLimit] = useState("5000");
   const [addDelay, setAddDelay] = useState("25000"); // Safe default delay to prevent bans
   const [spamStatus, setSpamStatus] = useState("");
@@ -115,8 +116,42 @@ export default function App() {
   useEffect(() => {
     fetchSessions();
     fetchArchives();
+    restoreSessionsFromBackup();
     addLog("info", "FULL-TG Web v2.5 initialized. Ready for commands.");
   }, []);
+
+  const restoreSessionsFromBackup = async () => {
+    const backup = localStorage.getItem("tg_sessions_backup");
+    if (!backup) return;
+    try {
+      const sessionsToRestore = JSON.parse(backup);
+      if (sessionsToRestore.length > 0) {
+        addLog("info", `Checking session backup (${sessionsToRestore.length} accounts)...`);
+        const res = await safeFetch("/api/sessions/restore", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessions: sessionsToRestore })
+        });
+        const data = await res.json();
+        if (data.restored > 0) {
+          addLog("success", `Restored ${data.restored} sessions from backup.`);
+          fetchSessions();
+        }
+      }
+    } catch (e) {
+      console.error("Backup restore failed:", e);
+    }
+  };
+
+  const backupSessions = (sessionsList: any[]) => {
+    const backupData = sessionsList.map(s => ({
+      phone: s.phone,
+      api_id: s.api_id,
+      api_hash: s.api_hash,
+      session_string: s.session_string
+    }));
+    localStorage.setItem("tg_sessions_backup", JSON.stringify(backupData));
+  };
 
   const fetchArchives = async () => {
     try {
@@ -260,6 +295,9 @@ export default function App() {
       }
       const data = await res.json();
       setSessions(data || []);
+      if (data && data.length > 0) {
+        backupSessions(data);
+      }
     } catch (e: any) {
       addLog("error", `Failed to fetch sessions: ${e.message}`);
     }
@@ -383,6 +421,7 @@ export default function App() {
     stopRef.current = false;
     
     const membersToTarget = scrapedMembers.map(m => m.username);
+    const retiredSessions = new Set<string>();
     
     // Check for existing progress
     let startIndex = 0;
@@ -403,43 +442,65 @@ export default function App() {
     try {
       // Parallel processing for Turbo Mode
       const processBatch = async (sessionPhone: string, startIdx: number, step: number) => {
+        let currentSession = sessionPhone;
+        
         for (let i = startIdx; i < membersToTarget.length; i += step) {
           if (stopRef.current) break;
+          if (retiredSessions.has(currentSession)) {
+            // Try to find a new session that isn't retired
+            const available = activeSessions.find(s => !retiredSessions.has(s));
+            if (available) {
+              currentSession = available;
+            } else {
+              addLog("error", "All accounts are currently restricted (PEER_FLOOD). Stopping.");
+              stopRef.current = true;
+              break;
+            }
+          }
 
           const username = membersToTarget[i];
           const res = await safeFetch("/api/add-members", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ 
-              phone: sessionPhone, 
+              phone: currentSession, 
               targetGroup, 
               members: [username],
-              delay: Math.max(parseInt(addDelay), 15000)
+              delay: isFastMode ? 500 : Math.max(parseInt(addDelay), 15000),
+              fastMode: isFastMode
             })
           });
 
           const data = await res.json();
           if (data.success && (data.results[0].status === "success" || data.results[0].status === "skipped")) {
             const statusMsg = data.results[0].status === "skipped" ? `Skipped @${username} (Already added)` : `Added @${username}`;
-            addLog("success", `[${sessionPhone}] ${statusMsg}`);
+            addLog("success", `[${currentSession}] ${statusMsg}`);
           } else {
             const error = data.results?.[0]?.error || data.error || "Unknown error";
-            addLog("error", `[${sessionPhone}] Failed @${username}: ${error}`);
+            addLog("error", `[${currentSession}] Failed @${username}: ${error}`);
             
+            if (error.includes("PEER_FLOOD")) {
+              addLog("error", `[${currentSession}] Account restricted. Rotating to next available account...`);
+              retiredSessions.add(currentSession);
+              // Retry this member with a different account immediately
+              i -= step; 
+              continue;
+            }
+
             if (error.includes("FLOOD_WAIT")) {
               const waitTime = parseInt(error.match(/\d+/)?.[0] || "60");
-              addLog("info", `[${sessionPhone}] Sleeping for ${waitTime}s due to flood wait...`);
+              addLog("info", `[${currentSession}] Sleeping for ${waitTime}s due to flood wait...`);
               await new Promise(r => setTimeout(r, waitTime * 1000));
             }
           }
 
           // Update progress in DB (only for the primary session to track overall progress)
-          if (sessionPhone === activeSessions[0]) {
+          if (currentSession === activeSessions[0]) {
             await safeFetch("/api/progress/save", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                phone: sessionPhone,
+                phone: currentSession,
                 targetGroup,
                 currentIndex: i + 1,
                 totalCount: membersToTarget.length,
@@ -451,7 +512,7 @@ export default function App() {
           }
           
           // Human-like delay
-          const actualDelay = Math.max(parseInt(addDelay), 15000) + Math.floor(Math.random() * 5000);
+          const actualDelay = isFastMode ? 200 : (Math.max(parseInt(addDelay), 15000) + Math.floor(Math.random() * 5000));
           await new Promise(r => setTimeout(r, actualDelay));
         }
       };
@@ -1123,17 +1184,40 @@ export default function App() {
                       <UserPlus /> ADD MEMBERS
                     </h2>
                     <div className="space-y-4">
-                      <div className="flex items-center justify-between p-3 bg-[#00ff00]/5 border border-[#00ff00]/20 rounded">
-                        <div className="flex items-center gap-2">
-                          <div className={`w-2 h-2 rounded-full ${isTurboMode ? 'bg-[#00ff00] animate-pulse' : 'bg-gray-600'}`} />
-                          <span className="text-xs font-bold">TURBO MULTI-ACCOUNT MODE</span>
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center justify-between p-3 bg-[#00ff00]/5 border border-[#00ff00]/20 rounded">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-2 h-2 rounded-full ${isTurboMode ? 'bg-[#00ff00] animate-pulse' : 'bg-gray-600'}`} />
+                            <span className="text-xs font-bold">TURBO MULTI-ACCOUNT MODE</span>
+                          </div>
+                          <button 
+                            onClick={() => setIsTurboMode(!isTurboMode)}
+                            className={`px-4 py-1 rounded text-[10px] font-black transition-all ${isTurboMode ? 'bg-[#00ff00] text-black' : 'bg-black text-[#00ff00] border border-[#00ff00]/30'}`}
+                          >
+                            {isTurboMode ? 'ON' : 'OFF'}
+                          </button>
                         </div>
-                        <button 
-                          onClick={() => setIsTurboMode(!isTurboMode)}
-                          className={`px-4 py-1 rounded text-[10px] font-black transition-all ${isTurboMode ? 'bg-[#00ff00] text-black' : 'bg-black text-[#00ff00] border border-[#00ff00]/30'}`}
-                        >
-                          {isTurboMode ? 'ON' : 'OFF'}
-                        </button>
+
+                        <div className="flex items-center justify-between p-3 bg-red-500/5 border border-red-500/20 rounded">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-2 h-2 rounded-full ${isFastMode ? 'bg-red-500 animate-ping' : 'bg-gray-600'}`} />
+                            <span className="text-xs font-bold text-red-500">ULTRA FAST MODE (HIGH RISK)</span>
+                          </div>
+                          <button 
+                            onClick={() => {
+                              if (!isFastMode) {
+                                if (window.confirm("WARNING: Ultra Fast Mode adds members instantly (0.5s delay). This is extremely likely to get your accounts BANNED or RESTRICTED. Use only with multiple backup accounts. Continue?")) {
+                                  setIsFastMode(true);
+                                }
+                              } else {
+                                setIsFastMode(false);
+                              }
+                            }}
+                            className={`px-4 py-1 rounded text-[10px] font-black transition-all ${isFastMode ? 'bg-red-500 text-white' : 'bg-black text-red-500 border border-red-500/30'}`}
+                          >
+                            {isFastMode ? 'ON' : 'OFF'}
+                          </button>
+                        </div>
                       </div>
 
                       <div className="space-y-2">

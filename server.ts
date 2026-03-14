@@ -168,12 +168,31 @@ app.post("/api/auth/sign-in", async (req, res) => {
 
 app.get("/api/sessions", (req, res) => {
   try {
-    const sessions = db.prepare("SELECT phone, api_id FROM sessions").all();
+    const sessions = db.prepare("SELECT * FROM sessions").all();
     return res.json(sessions || []);
   } catch (err: any) {
     console.error("Error fetching sessions:", err);
     return res.status(500).json({ error: err.message });
   }
+});
+
+app.post("/api/sessions/restore", (req, res) => {
+  const { sessions } = req.body;
+  if (!sessions || !Array.isArray(sessions)) return res.status(400).json({ error: "Invalid sessions list" });
+  
+  let restored = 0;
+  const insert = db.prepare("INSERT OR IGNORE INTO sessions (phone, api_id, api_hash, session_string) VALUES (?, ?, ?, ?)");
+  
+  for (const s of sessions) {
+    try {
+      const result = insert.run(s.phone, s.api_id, s.api_hash, s.session_string);
+      if (result.changes > 0) restored++;
+    } catch (e) {
+      console.error(`Failed to restore session for ${s.phone}:`, e);
+    }
+  }
+  
+  res.json({ success: true, restored });
 });
 
 app.post("/api/scrape", async (req, res) => {
@@ -227,7 +246,7 @@ app.post("/api/scrape", async (req, res) => {
 });
 
 app.post("/api/add-members", async (req, res) => {
-  const { phone, targetGroup, members, delay = 15000 } = req.body;
+  const { phone, targetGroup, members, delay = 15000, fastMode = false } = req.body;
   const session = db.prepare("SELECT * FROM sessions WHERE phone = ?").get(phone) as any;
 
   if (!session) return res.status(404).json({ error: "Session not found" });
@@ -257,11 +276,11 @@ app.post("/api/add-members", async (req, res) => {
       }
 
       try {
-        const safeDelay = Math.max(parseInt(delay.toString()), 15000);
-        const jitter = Math.floor(Math.random() * 10000) + 5000;
+        const safeDelay = fastMode ? Math.max(parseInt(delay.toString()), 200) : Math.max(parseInt(delay.toString()), 15000);
+        const jitter = fastMode ? Math.floor(Math.random() * 300) : (Math.floor(Math.random() * 10000) + 5000);
         const totalDelay = safeDelay + jitter;
         
-        console.log(`[Telegram] Human-Mimicry: Waiting ${Math.round(totalDelay/1000)}s before adding @${username}...`);
+        console.log(`[Telegram] ${fastMode ? 'FAST-MODE' : 'Human-Mimicry'}: Waiting ${Math.round(totalDelay/1000)}s before adding @${username}...`);
         await new Promise(r => setTimeout(r, totalDelay));
 
         await client.invoke(new (await import("telegram/tl/index.js")).Api.channels.InviteToChannel({
@@ -284,6 +303,11 @@ app.post("/api/add-members", async (req, res) => {
         }
         
         if (e.message.includes("PEER_FLOOD") || e.message.includes("USER_PRIVACY_RESTRICTED") || e.message.includes("USER_NOT_MUTUAL_CONTACT")) {
+          // Return early so client can rotate account
+          if (e.message.includes("PEER_FLOOD")) {
+            await client.disconnect();
+            return res.json({ success: false, results, error: "PEER_FLOOD" });
+          }
           continue;
         }
         
