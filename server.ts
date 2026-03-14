@@ -222,21 +222,26 @@ app.post("/api/add-members", async (req, res) => {
     const target = await client.getEntity(targetGroup);
     const results: any[] = [];
     
-    // Professional "Gentle" adding: smaller batches, longer random delays
-    const batchSize = 1; // 1 by 1 is safest to avoid bot detection
+    // Professional "Gentle" adding: 1 by 1 is safest to avoid bot detection
     for (let i = 0; i < members.length; i++) {
       const username = members[i];
       try {
+        // Enforce minimum safe delay of 15 seconds
+        const safeDelay = Math.max(parseInt(delay.toString()), 15000);
+        
+        // Random "Human" jitter: adds 5-15 seconds of extra random wait
+        const jitter = Math.floor(Math.random() * 10000) + 5000;
+        const totalDelay = safeDelay + jitter;
+        
+        console.log(`[Telegram] Human-Mimicry: Waiting ${Math.round(totalDelay/1000)}s before adding @${username}...`);
+        await new Promise(r => setTimeout(r, totalDelay));
+
         await client.invoke(new (await import("telegram/tl/index.js")).Api.channels.InviteToChannel({
           channel: target,
           users: [username]
         }));
         
         results.push({ username, status: "success" });
-        
-        // Random delay between 5-15 seconds (or user defined) to mimic human behavior
-        const actualDelay = delay + Math.floor(Math.random() * 5000);
-        await new Promise(r => setTimeout(r, actualDelay));
         
       } catch (e: any) {
         results.push({ username, status: "failed", error: e.message });
@@ -654,10 +659,15 @@ app.post("/api/social/add", async (req, res) => {
         const targetGroup = await client.getEntity(targetProfile);
         const targetUser = await client.getEntity(follower);
 
-        // Human-Mimicry Delay: Randomized between 15 and 45 seconds
-        const humanDelay = Math.floor(Math.random() * (45000 - 15000 + 1)) + 15000;
-        console.log(`[Telegram] Human-Mimicry Delay: Waiting ${Math.round(humanDelay/1000)}s before adding...`);
-        await new Promise(r => setTimeout(r, humanDelay));
+        // Enforce minimum safe delay of 15 seconds
+        const safeDelay = Math.max(parseInt(delay.toString()), 15000);
+        
+        // Random "Human" jitter: adds 10-30 seconds of extra random wait
+        const jitter = Math.floor(Math.random() * 20000) + 10000;
+        const totalDelay = safeDelay + jitter;
+        
+        console.log(`[Telegram] Human-Mimicry: Waiting ${Math.round(totalDelay/1000)}s before adding @${follower}...`);
+        await new Promise(r => setTimeout(r, totalDelay));
 
         // Perform the add
         await client.invoke(

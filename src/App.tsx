@@ -86,7 +86,7 @@ export default function App() {
   const [scrapedMembers, setScrapedMembers] = useState<any[]>([]);
   const [selectedSession, setSelectedSession] = useState("");
   const [scrapeLimit, setScrapeLimit] = useState("5000");
-  const [addDelay, setAddDelay] = useState("1000"); // Faster default delay as requested
+  const [addDelay, setAddDelay] = useState("25000"); // Safe default delay to prevent bans
   const [spamStatus, setSpamStatus] = useState("");
   const [messageTarget, setMessageTarget] = useState("");
   const [messageContent, setMessageContent] = useState("");
@@ -320,7 +320,13 @@ export default function App() {
     const membersToTarget = scrapedMembers.map(m => m.username);
     setProgress({ current: 0, total: membersToTarget.length });
     
-    addLog("command", `Adding ${membersToTarget.length} members to ${targetGroup} (Delay: ${addDelay}ms)...`);
+    const delayVal = parseInt(addDelay);
+    if (delayVal < 15000) {
+      addLog("error", "CRITICAL: Delay is too low! Minimum safe delay is 15000ms (15 seconds). Adjusting to 15000ms for your safety.");
+    }
+    const safeDelay = Math.max(delayVal, 15000);
+
+    addLog("command", `Adding ${membersToTarget.length} members to ${targetGroup} (Safe Delay: ${safeDelay}ms)...`);
     
     try {
       // We process in small batches on the frontend to allow for "Stop" functionality
@@ -339,7 +345,7 @@ export default function App() {
             phone: selectedSession, 
             targetGroup, 
             members: [username],
-            delay: parseInt(addDelay)
+            delay: Math.max(parseInt(addDelay), 15000)
           })
         });
 
@@ -360,7 +366,7 @@ export default function App() {
         setProgress({ current: i + 1, total: membersToTarget.length });
         
         // Human-like delay
-        const actualDelay = parseInt(addDelay) + Math.floor(Math.random() * 2000);
+        const actualDelay = Math.max(parseInt(addDelay), 15000) + Math.floor(Math.random() * 5000);
         await new Promise(r => setTimeout(r, actualDelay));
       }
 
@@ -439,6 +445,12 @@ export default function App() {
     addLog("info", `Targeting Profile: ${targetProfile} 🎯`);
     addLog("info", "Activating stealth protocols... 🕶️");
     
+    const delayVal = parseInt(addDelay);
+    if (delayVal < 15000) {
+      addLog("error", "CRITICAL: Delay is too low! Minimum safe delay is 15000ms. Adjusting for safety.");
+    }
+    const safeDelay = Math.max(delayVal, 15000);
+
     try {
       if (socialSessions.length === 0) {
         addLog("error", "No connected account found. Please connect your account first.");
@@ -460,7 +472,7 @@ export default function App() {
             platform, 
             targetProfile, 
             follower: member.username,
-            delay: parseInt(addDelay),
+            delay: Math.max(parseInt(addDelay), 15000),
             username: socialSessions[0].username
           })
         });
@@ -475,7 +487,7 @@ export default function App() {
         setProgress({ current: i + 1, total: scrapedMembers.length });
         
         // Human-like delay
-        const actualDelay = parseInt(addDelay) + Math.floor(Math.random() * 3000);
+        const actualDelay = Math.max(parseInt(addDelay), 15000) + Math.floor(Math.random() * 5000);
         await new Promise(r => setTimeout(r, actualDelay));
       }
 
@@ -977,7 +989,7 @@ export default function App() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <label className="text-xs opacity-50">DELAY PER ADD (MS)</label>
+                          <label className="text-xs opacity-50">DELAY PER ADD (MS) - MIN 15000</label>
                           <input
                             type="number"
                             value={addDelay}
