@@ -53,6 +53,7 @@ const MENU_OPTIONS: MenuOption[] = [
   { id: 2, label: "LOGOUT ACCOUNTS", category: "LOGIN MENU", icon: <LogOut size={16} /> },
   { id: 4, label: "SPAM-CHECKER", category: "CHECKER MENU", icon: <ShieldCheck size={16} /> },
   { id: 14, label: "TELEGRAM SCRAPER", category: "SCRAPER MENU", icon: <Search size={16} /> },
+  { id: 15, label: "SAVED LISTS", category: "SCRAPER MENU", icon: <Edit3 size={16} /> },
   { id: 18, label: "TELEGRAM ADDER", category: "ADDER MENU", icon: <UserPlus size={16} /> },
   { id: 19, label: "SEND MESSAGES", category: "MESSAGE MENU", icon: <MessageSquare size={16} /> },
   { id: 24, label: "TELEGRAM TOOLS", category: "SOCIAL GROWTH", icon: <Globe size={16} /> },
@@ -85,11 +86,17 @@ export default function App() {
   const [targetGroup, setTargetGroup] = useState("");
   const [scrapedMembers, setScrapedMembers] = useState<any[]>([]);
   const [selectedSession, setSelectedSession] = useState("");
+  const [selectedSessions, setSelectedSessions] = useState<string[]>([]);
+  const [isTurboMode, setIsTurboMode] = useState(false);
   const [scrapeLimit, setScrapeLimit] = useState("5000");
   const [addDelay, setAddDelay] = useState("25000"); // Safe default delay to prevent bans
   const [spamStatus, setSpamStatus] = useState("");
   const [messageTarget, setMessageTarget] = useState("");
   const [messageContent, setMessageContent] = useState("");
+  
+  // Archive states
+  const [archives, setArchives] = useState<any[]>([]);
+  const [archiveName, setArchiveName] = useState("");
   
   // Progress states
   const [progress, setProgress] = useState({ current: 0, total: 0 });
@@ -107,8 +114,63 @@ export default function App() {
 
   useEffect(() => {
     fetchSessions();
+    fetchArchives();
     addLog("info", "FULL-TG Web v2.5 initialized. Ready for commands.");
   }, []);
+
+  const fetchArchives = async () => {
+    try {
+      const res = await safeFetch("/api/archive/list");
+      const data = await res.json();
+      setArchives(data);
+    } catch (e: any) {
+      console.error("Failed to fetch archives:", e);
+    }
+  };
+
+  const saveToArchive = async () => {
+    if (!archiveName || scrapedMembers.length === 0) return addLog("error", "Name and members required");
+    try {
+      const res = await safeFetch("/api/archive/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: archiveName, members: scrapedMembers })
+      });
+      const data = await res.json();
+      if (data.success) {
+        addLog("success", `List saved to archives: ${archiveName}`);
+        setArchiveName("");
+        fetchArchives();
+      }
+    } catch (e: any) {
+      addLog("error", e.message);
+    }
+  };
+
+  const loadArchive = async (id: number) => {
+    setLoading(true);
+    try {
+      const res = await safeFetch(`/api/archive/${id}`);
+      const data = await res.json();
+      setScrapedMembers(data.members);
+      addLog("success", `Loaded ${data.members.length} members from archive: ${data.name}`);
+      setSelectedOption(18); // Switch to Adder
+    } catch (e: any) {
+      addLog("error", e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteArchive = async (id: number) => {
+    try {
+      await safeFetch(`/api/archive/${id}`, { method: "DELETE" });
+      fetchArchives();
+      addLog("info", "Archive deleted.");
+    } catch (e: any) {
+      addLog("error", e.message);
+    }
+  };
 
   useEffect(() => {
     if ([20, 21, 22, 23, 24].includes(selectedOption || 0)) {
@@ -311,66 +373,109 @@ export default function App() {
   };
 
   const handleAddMembers = async () => {
-    if (!selectedSession || !targetGroup || scrapedMembers.length === 0) {
-      return addLog("error", "Missing session, target group, or scraped members");
+    const activeSessions = isTurboMode ? selectedSessions : [selectedSession];
+    if (activeSessions.length === 0 || !targetGroup || scrapedMembers.length === 0) {
+      return addLog("error", "Missing session(s), target group, or scraped members");
     }
+
     setLoading(true);
     setIsStopping(false);
     stopRef.current = false;
-    const membersToTarget = scrapedMembers.map(m => m.username);
-    setProgress({ current: 0, total: membersToTarget.length });
     
-    const delayVal = parseInt(addDelay);
-    if (delayVal < 15000) {
-      addLog("error", "CRITICAL: Delay is too low! Minimum safe delay is 15000ms (15 seconds). Adjusting to 15000ms for your safety.");
+    const membersToTarget = scrapedMembers.map(m => m.username);
+    
+    // Check for existing progress
+    let startIndex = 0;
+    try {
+      const res = await safeFetch(`/api/progress/get?phone=${activeSessions[0]}&targetGroup=${targetGroup}`);
+      const data = await res.json();
+      if (data && data.current_index < data.total_count) {
+        startIndex = data.current_index;
+        addLog("info", `Resuming from member #${startIndex + 1}...`);
+      }
+    } catch (e) {
+      console.error("Failed to check progress:", e);
     }
-    const safeDelay = Math.max(delayVal, 15000);
 
-    addLog("command", `Adding ${membersToTarget.length} members to ${targetGroup} (Safe Delay: ${safeDelay}ms)...`);
+    setProgress({ current: startIndex, total: membersToTarget.length });
+    addLog("command", `${isTurboMode ? "[TURBO MODE] " : ""}Adding ${membersToTarget.length - startIndex} members to ${targetGroup}...`);
     
     try {
-      // We process in small batches on the frontend to allow for "Stop" functionality
-      // and real-time progress updates.
-      for (let i = 0; i < membersToTarget.length; i++) {
-        if (stopRef.current) {
-          addLog("info", "Adding process stopped by user.");
-          break;
-        }
+      // Parallel processing for Turbo Mode
+      const processBatch = async (sessionPhone: string, startIdx: number, step: number) => {
+        for (let i = startIdx; i < membersToTarget.length; i += step) {
+          if (stopRef.current) break;
 
-        const username = membersToTarget[i];
-        const res = await safeFetch("/api/add-members", {
+          const username = membersToTarget[i];
+          const res = await safeFetch("/api/add-members", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ 
+              phone: sessionPhone, 
+              targetGroup, 
+              members: [username],
+              delay: Math.max(parseInt(addDelay), 15000)
+            })
+          });
+
+          const data = await res.json();
+          if (data.success && (data.results[0].status === "success" || data.results[0].status === "skipped")) {
+            const statusMsg = data.results[0].status === "skipped" ? `Skipped @${username} (Already added)` : `Added @${username}`;
+            addLog("success", `[${sessionPhone}] ${statusMsg}`);
+          } else {
+            const error = data.results?.[0]?.error || data.error || "Unknown error";
+            addLog("error", `[${sessionPhone}] Failed @${username}: ${error}`);
+            
+            if (error.includes("FLOOD_WAIT")) {
+              const waitTime = parseInt(error.match(/\d+/)?.[0] || "60");
+              addLog("info", `[${sessionPhone}] Sleeping for ${waitTime}s due to flood wait...`);
+              await new Promise(r => setTimeout(r, waitTime * 1000));
+            }
+          }
+
+          // Update progress in DB (only for the primary session to track overall progress)
+          if (sessionPhone === activeSessions[0]) {
+            await safeFetch("/api/progress/save", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                phone: sessionPhone,
+                targetGroup,
+                currentIndex: i + 1,
+                totalCount: membersToTarget.length,
+                members: scrapedMembers,
+                status: stopRef.current ? 'stopped' : 'running'
+              })
+            });
+            setProgress(prev => ({ ...prev, current: i + 1 }));
+          }
+          
+          // Human-like delay
+          const actualDelay = Math.max(parseInt(addDelay), 15000) + Math.floor(Math.random() * 5000);
+          await new Promise(r => setTimeout(r, actualDelay));
+        }
+      };
+
+      // Start parallel workers
+      const workers = activeSessions.map((phone, idx) => processBatch(phone, startIndex + idx, activeSessions.length));
+      await Promise.all(workers);
+
+      if (!stopRef.current) {
+        addLog("success", "Member adding process finished.");
+        // Mark progress as completed
+        await safeFetch("/api/progress/save", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ 
-            phone: selectedSession, 
-            targetGroup, 
-            members: [username],
-            delay: Math.max(parseInt(addDelay), 15000)
+          body: JSON.stringify({
+            phone: activeSessions[0],
+            targetGroup,
+            currentIndex: membersToTarget.length,
+            totalCount: membersToTarget.length,
+            members: scrapedMembers,
+            status: 'completed'
           })
         });
-
-        const data = await res.json();
-        if (data.success && data.results[0].status === "success") {
-          addLog("success", `[${i+1}/${membersToTarget.length}] Added @${username}`);
-        } else {
-          const error = data.results?.[0]?.error || data.error || "Unknown error";
-          addLog("error", `[${i+1}/${membersToTarget.length}] Failed @${username}: ${error}`);
-          
-          if (error.includes("FLOOD_WAIT")) {
-            const waitTime = parseInt(error.match(/\d+/)?.[0] || "60");
-            addLog("info", `Sleeping for ${waitTime}s due to flood wait...`);
-            await new Promise(r => setTimeout(r, waitTime * 1000));
-          }
-        }
-
-        setProgress({ current: i + 1, total: membersToTarget.length });
-        
-        // Human-like delay
-        const actualDelay = Math.max(parseInt(addDelay), 15000) + Math.floor(Math.random() * 5000);
-        await new Promise(r => setTimeout(r, actualDelay));
       }
-
-      addLog("success", "Member adding process finished.");
     } catch (e: any) {
       addLog("error", e.message);
     } finally {
@@ -944,14 +1049,68 @@ export default function App() {
                       </button>
 
                       {scrapedMembers.length > 0 && (
-                        <div className="mt-6 border border-[#00ff00]/20 rounded p-4">
-                          <h3 className="text-sm font-bold mb-2">SCRAPED MEMBERS ({scrapedMembers.length})</h3>
-                          <div className="max-h-40 overflow-y-auto text-[10px] space-y-1 opacity-60">
-                            {scrapedMembers.map((m, i) => (
-                              <div key={i}>@{m.username} - {m.firstName} {m.lastName}</div>
-                            ))}
+                        <div className="mt-6 space-y-4">
+                          <div className="flex gap-2">
+                            <input 
+                              type="text"
+                              placeholder="Archive Name (e.g. Crypto Group 1)"
+                              value={archiveName}
+                              onChange={e => setArchiveName(e.target.value)}
+                              className="flex-1 bg-black border border-[#00ff00]/30 p-2 rounded text-sm outline-none"
+                            />
+                            <button 
+                              onClick={saveToArchive}
+                              className="px-4 py-2 bg-[#00ff00]/20 text-[#00ff00] border border-[#00ff00]/30 rounded text-xs font-bold hover:bg-[#00ff00] hover:text-black transition-all"
+                            >
+                              SAVE LIST
+                            </button>
+                          </div>
+                          <div className="border border-[#00ff00]/20 rounded p-4">
+                            <h3 className="text-sm font-bold mb-2">SCRAPED MEMBERS ({scrapedMembers.length})</h3>
+                            <div className="max-h-40 overflow-y-auto text-[10px] space-y-1 opacity-60">
+                              {scrapedMembers.map((m, i) => (
+                                <div key={i}>@{m.username} - {m.firstName} {m.lastName}</div>
+                              ))}
+                            </div>
                           </div>
                         </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Saved Lists */}
+                {selectedOption === 15 && (
+                  <div className="space-y-6">
+                    <h2 className="text-2xl font-bold flex items-center gap-3">
+                      <Edit3 /> SAVED LISTS
+                    </h2>
+                    <div className="space-y-4">
+                      {archives.length === 0 ? (
+                        <p className="opacity-50 italic">No saved lists found. Scrape some members first!</p>
+                      ) : (
+                        archives.map(archive => (
+                          <div key={archive.id} className="p-4 bg-black border border-[#00ff00]/20 rounded flex items-center justify-between">
+                            <div>
+                              <p className="font-bold text-[#00ff00]">{archive.name}</p>
+                              <p className="text-[10px] opacity-50">{new Date(archive.created_at).toLocaleString()}</p>
+                            </div>
+                            <div className="flex gap-2">
+                              <button 
+                                onClick={() => loadArchive(archive.id)}
+                                className="px-3 py-1 bg-[#00ff00]/10 text-[#00ff00] border border-[#00ff00]/30 rounded text-[10px] hover:bg-[#00ff00] hover:text-black transition-all"
+                              >
+                                LOAD
+                              </button>
+                              <button 
+                                onClick={() => deleteArchive(archive.id)}
+                                className="px-3 py-1 bg-red-500/10 text-red-500 border border-red-500/30 rounded text-[10px] hover:bg-red-500 hover:text-white transition-all"
+                              >
+                                DELETE
+                              </button>
+                            </div>
+                          </div>
+                        ))
                       )}
                     </div>
                   </div>
@@ -964,18 +1123,52 @@ export default function App() {
                       <UserPlus /> ADD MEMBERS
                     </h2>
                     <div className="space-y-4">
-                      <div className="space-y-2">
-                        <label className="text-xs opacity-50">SELECT ACCOUNT</label>
-                        <select 
-                          value={selectedSession}
-                          onChange={e => setSelectedSession(e.target.value)}
-                          className="w-full bg-black border border-[#00ff00]/30 p-3 rounded focus:border-[#00ff00] outline-none"
+                      <div className="flex items-center justify-between p-3 bg-[#00ff00]/5 border border-[#00ff00]/20 rounded">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-2 h-2 rounded-full ${isTurboMode ? 'bg-[#00ff00] animate-pulse' : 'bg-gray-600'}`} />
+                          <span className="text-xs font-bold">TURBO MULTI-ACCOUNT MODE</span>
+                        </div>
+                        <button 
+                          onClick={() => setIsTurboMode(!isTurboMode)}
+                          className={`px-4 py-1 rounded text-[10px] font-black transition-all ${isTurboMode ? 'bg-[#00ff00] text-black' : 'bg-black text-[#00ff00] border border-[#00ff00]/30'}`}
                         >
-                          <option value="">-- SELECT SESSION --</option>
-                          {sessions.map(s => (
-                            <option key={s.phone} value={s.phone}>{s.phone}</option>
-                          ))}
-                        </select>
+                          {isTurboMode ? 'ON' : 'OFF'}
+                        </button>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-xs opacity-50">
+                          {isTurboMode ? 'SELECT MULTIPLE ACCOUNTS (CTRL+CLICK)' : 'SELECT ACCOUNT'}
+                        </label>
+                        {isTurboMode ? (
+                          <div className="max-h-32 overflow-y-auto border border-[#00ff00]/30 rounded bg-black p-2 space-y-1">
+                            {sessions.map(s => (
+                              <label key={s.phone} className="flex items-center gap-2 p-2 hover:bg-[#00ff00]/10 rounded cursor-pointer">
+                                <input 
+                                  type="checkbox"
+                                  checked={selectedSessions.includes(s.phone)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) setSelectedSessions([...selectedSessions, s.phone]);
+                                    else setSelectedSessions(selectedSessions.filter(p => p !== s.phone));
+                                  }}
+                                  className="accent-[#00ff00]"
+                                />
+                                <span className="text-xs">{s.phone}</span>
+                              </label>
+                            ))}
+                          </div>
+                        ) : (
+                          <select 
+                            value={selectedSession}
+                            onChange={e => setSelectedSession(e.target.value)}
+                            className="w-full bg-black border border-[#00ff00]/30 p-3 rounded focus:border-[#00ff00] outline-none"
+                          >
+                            <option value="">-- SELECT SESSION --</option>
+                            {sessions.map(s => (
+                              <option key={s.phone} value={s.phone}>{s.phone}</option>
+                            ))}
+                          </select>
+                        )}
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">

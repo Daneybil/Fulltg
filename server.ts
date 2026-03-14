@@ -32,6 +32,30 @@ try {
       auth_data TEXT,
       UNIQUE(platform, username)
     );
+    CREATE TABLE IF NOT EXISTS added_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT,
+      target_group TEXT,
+      added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(username, target_group)
+    );
+    CREATE TABLE IF NOT EXISTS scraped_archives (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT,
+      members_json TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS adding_progress (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone TEXT,
+      target_group TEXT,
+      current_index INTEGER,
+      total_count INTEGER,
+      members_json TEXT,
+      status TEXT DEFAULT 'running',
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(phone, target_group)
+    );
   `);
   console.log("Database initialized successfully at:", dbPath);
 } catch (e) {
@@ -203,7 +227,7 @@ app.post("/api/scrape", async (req, res) => {
 });
 
 app.post("/api/add-members", async (req, res) => {
-  const { phone, targetGroup, members, delay = 5000 } = req.body;
+  const { phone, targetGroup, members, delay = 15000 } = req.body;
   const session = db.prepare("SELECT * FROM sessions WHERE phone = ?").get(phone) as any;
 
   if (!session) return res.status(404).json({ error: "Session not found" });
@@ -222,14 +246,18 @@ app.post("/api/add-members", async (req, res) => {
     const target = await client.getEntity(targetGroup);
     const results: any[] = [];
     
-    // Professional "Gentle" adding: 1 by 1 is safest to avoid bot detection
     for (let i = 0; i < members.length; i++) {
       const username = members[i];
+      
+      // Check history first
+      const alreadyAdded = db.prepare("SELECT * FROM added_history WHERE username = ? AND target_group = ?").get(username, targetGroup);
+      if (alreadyAdded) {
+        results.push({ username, status: "skipped", reason: "Already added previously" });
+        continue;
+      }
+
       try {
-        // Enforce minimum safe delay of 15 seconds
         const safeDelay = Math.max(parseInt(delay.toString()), 15000);
-        
-        // Random "Human" jitter: adds 5-15 seconds of extra random wait
         const jitter = Math.floor(Math.random() * 10000) + 5000;
         const totalDelay = safeDelay + jitter;
         
@@ -240,6 +268,9 @@ app.post("/api/add-members", async (req, res) => {
           channel: target,
           users: [username]
         }));
+        
+        // Record success in history
+        db.prepare("INSERT OR IGNORE INTO added_history (username, target_group) VALUES (?, ?)").run(username, targetGroup);
         
         results.push({ username, status: "success" });
         
@@ -252,12 +283,10 @@ app.post("/api/add-members", async (req, res) => {
           await new Promise(r => setTimeout(r, waitTime * 1000));
         }
         
-        if (e.message.includes("PEER_FLOOD") || e.message.includes("USER_PRIVACY_RESTRICTED")) {
-          // Skip these users but continue
+        if (e.message.includes("PEER_FLOOD") || e.message.includes("USER_PRIVACY_RESTRICTED") || e.message.includes("USER_NOT_MUTUAL_CONTACT")) {
           continue;
         }
         
-        // If too many failures, stop to protect account
         const recentFailures = results.slice(-5).filter(r => r.status === "failed").length;
         if (recentFailures >= 5) {
           results.push({ system: true, message: "Too many consecutive failures. Stopping to protect account." });
@@ -266,9 +295,88 @@ app.post("/api/add-members", async (req, res) => {
       }
     }
 
+    await client.disconnect();
     return res.json({ success: true, results });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
+  }
+});
+
+// Archive Endpoints
+app.post("/api/archive/save", (req, res) => {
+  const { name, members } = req.body;
+  try {
+    const stmt = db.prepare("INSERT INTO scraped_archives (name, members_json) VALUES (?, ?)");
+    const info = stmt.run(name, JSON.stringify(members));
+    return res.json({ success: true, id: info.lastInsertRowid });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/api/archive/list", (req, res) => {
+  try {
+    const archives = db.prepare("SELECT id, name, created_at FROM scraped_archives ORDER BY created_at DESC").all();
+    return res.json(archives);
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/api/archive/:id", (req, res) => {
+  try {
+    const archive = db.prepare("SELECT * FROM scraped_archives WHERE id = ?").get(req.params.id);
+    if (!archive) return res.status(404).json({ error: "Archive not found" });
+    return res.json({ ...archive, members: JSON.parse(archive.members_json) });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete("/api/archive/:id", (req, res) => {
+  try {
+    db.prepare("DELETE FROM scraped_archives WHERE id = ?").run(req.params.id);
+    return res.json({ success: true });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// Progress Endpoints
+app.post("/api/progress/save", (req, res) => {
+  const { phone, targetGroup, currentIndex, totalCount, members, status } = req.body;
+  try {
+    db.prepare(`
+      INSERT INTO adding_progress (phone, target_group, current_index, total_count, members_json, status, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(phone, target_group) DO UPDATE SET
+        current_index = excluded.current_index,
+        status = excluded.status,
+        updated_at = CURRENT_TIMESTAMP
+    `).run(phone, targetGroup, currentIndex, totalCount, JSON.stringify(members), status);
+    return res.json({ success: true });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/api/progress/get", (req, res) => {
+  const { phone, targetGroup } = req.query;
+  try {
+    const progress = db.prepare("SELECT * FROM adding_progress WHERE phone = ? AND target_group = ?").get(phone, targetGroup);
+    if (!progress) return res.json(null);
+    return res.json({ ...progress, members: JSON.parse(progress.members_json) });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/api/progress/all", (req, res) => {
+  try {
+    const allProgress = db.prepare("SELECT * FROM adding_progress ORDER BY updated_at DESC").all();
+    return res.json(allProgress.map((p: any) => ({ ...p, members: JSON.parse(p.members_json) })));
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
   }
 });
 
