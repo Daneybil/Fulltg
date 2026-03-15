@@ -89,6 +89,7 @@ export default function App() {
   const [selectedSessions, setSelectedSessions] = useState<string[]>([]);
   const [isTurboMode, setIsTurboMode] = useState(false);
   const [isFastMode, setIsFastMode] = useState(false);
+  const [isUnstoppable, setIsUnstoppable] = useState(true);
   const [scrapeLimit, setScrapeLimit] = useState("5000");
   const [addDelay, setAddDelay] = useState("25000"); // Safe default delay to prevent bans
   const [spamStatus, setSpamStatus] = useState("");
@@ -443,14 +444,22 @@ export default function App() {
       // Parallel processing for Turbo Mode
       const processBatch = async (sessionPhone: string, startIdx: number, step: number) => {
         let currentSession = sessionPhone;
+        let retryCount = 0;
         
         for (let i = startIdx; i < membersToTarget.length; i += step) {
           if (stopRef.current) break;
+          
           if (retiredSessions.has(currentSession)) {
-            // Try to find a new session that isn't retired
             const available = activeSessions.find(s => !retiredSessions.has(s));
             if (available) {
               currentSession = available;
+              retryCount = 0;
+            } else if (isUnstoppable) {
+              addLog("info", "⚠️ All accounts are currently on cooldown. Waiting 60s before retrying loop...");
+              await new Promise(r => setTimeout(r, 60000));
+              retiredSessions.clear(); // Reset the cycle
+              i -= step; // Retry this member
+              continue;
             } else {
               addLog("error", "All accounts are currently restricted (PEER_FLOOD). Stopping.");
               stopRef.current = true;
@@ -459,60 +468,63 @@ export default function App() {
           }
 
           const username = membersToTarget[i];
-          const res = await safeFetch("/api/add-members", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ 
-              phone: currentSession, 
-              targetGroup, 
-              members: [username],
-              delay: isFastMode ? 500 : Math.max(parseInt(addDelay), 15000),
-              fastMode: isFastMode
-            })
-          });
+          try {
+            const res = await safeFetch("/api/add-members", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ 
+                phone: currentSession, 
+                targetGroup, 
+                members: [username],
+                delay: isFastMode ? 200 : Math.max(parseInt(addDelay), 15000),
+                fastMode: isFastMode
+              })
+            });
 
-          const data = await res.json();
-          if (data.success && (data.results[0].status === "success" || data.results[0].status === "skipped")) {
-            const statusMsg = data.results[0].status === "skipped" ? `Skipped @${username} (Already added)` : `Added @${username}`;
-            addLog("success", `[${currentSession}] ${statusMsg}`);
-          } else {
-            const error = data.results?.[0]?.error || data.error || "Unknown error";
-            addLog("error", `[${currentSession}] Failed @${username}: ${error}`);
-            
-            if (error.includes("PEER_FLOOD")) {
-              addLog("error", `[${currentSession}] Account restricted. Rotating to next available account...`);
-              retiredSessions.add(currentSession);
-              // Retry this member with a different account immediately
-              i -= step; 
-              continue;
-            }
+            const data = await res.json();
+            if (data.success && (data.results[0].status === "success" || data.results[0].status === "skipped")) {
+              const statusMsg = data.results[0].status === "skipped" ? `Skipped @${username} (Already added)` : `Added @${username}`;
+              addLog("success", `[${currentSession}] ${statusMsg}`);
+            } else {
+              const error = data.results?.[0]?.error || data.error || "Unknown error";
+              
+              if (error.includes("PEER_FLOOD") || error.includes("FLOOD_WAIT")) {
+                const isFloodWait = error.includes("FLOOD_WAIT");
+                addLog("error", `[${currentSession}] Account ${isFloodWait ? 'Flood Wait' : 'Restricted'}. Rotating...`);
+                retiredSessions.add(currentSession);
+                i -= step; // Retry this member with next account
+                continue;
+              }
 
-            if (error.includes("FLOOD_WAIT")) {
-              const waitTime = parseInt(error.match(/\d+/)?.[0] || "60");
-              addLog("info", `[${currentSession}] Sleeping for ${waitTime}s due to flood wait...`);
-              await new Promise(r => setTimeout(r, waitTime * 1000));
+              // For any other error (Privacy, Not mutual, etc.), just skip and move on FAST
+              addLog("info", `[${currentSession}] Skipping @${username}: ${error.slice(0, 30)}...`);
             }
+          } catch (e) {
+            addLog("error", `Request failed for @${username}, skipping...`);
           }
 
           // Update progress in DB (only for the primary session to track overall progress)
           if (currentSession === activeSessions[0]) {
-            await safeFetch("/api/progress/save", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                phone: currentSession,
-                targetGroup,
-                currentIndex: i + 1,
-                totalCount: membersToTarget.length,
-                members: scrapedMembers,
-                status: stopRef.current ? 'stopped' : 'running'
-              })
-            });
+            try {
+              await safeFetch("/api/progress/save", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  phone: currentSession,
+                  targetGroup,
+                  currentIndex: i + 1,
+                  totalCount: membersToTarget.length,
+                  members: scrapedMembers,
+                  status: stopRef.current ? 'stopped' : 'running'
+                })
+              });
+            } catch (e) {
+              console.error("Failed to save progress:", e);
+            }
             setProgress(prev => ({ ...prev, current: i + 1 }));
           }
           
-          // Human-like delay
-          const actualDelay = isFastMode ? 200 : (Math.max(parseInt(addDelay), 15000) + Math.floor(Math.random() * 5000));
+          const actualDelay = isFastMode ? 50 : (Math.max(parseInt(addDelay), 15000) + Math.floor(Math.random() * 2000));
           await new Promise(r => setTimeout(r, actualDelay));
         }
       };
@@ -1218,12 +1230,37 @@ export default function App() {
                             {isFastMode ? 'ON' : 'OFF'}
                           </button>
                         </div>
+                        <div className="flex items-center justify-between p-3 bg-blue-500/5 border border-blue-500/20 rounded">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-2 h-2 rounded-full ${isUnstoppable ? 'bg-blue-500 animate-pulse' : 'bg-gray-600'}`} />
+                            <span className="text-xs font-bold text-blue-400">UNSTOPPABLE RESILIENCE MODE</span>
+                          </div>
+                          <button 
+                            onClick={() => setIsUnstoppable(!isUnstoppable)}
+                            className={`px-4 py-1 rounded text-[10px] font-black transition-all ${isUnstoppable ? 'bg-blue-500 text-white' : 'bg-black text-blue-500 border border-blue-500/30'}`}
+                          >
+                            {isUnstoppable ? 'ON' : 'OFF'}
+                          </button>
+                        </div>
                       </div>
 
                       <div className="space-y-2">
-                        <label className="text-xs opacity-50">
-                          {isTurboMode ? 'SELECT MULTIPLE ACCOUNTS (CTRL+CLICK)' : 'SELECT ACCOUNT'}
-                        </label>
+                        <div className="flex justify-between items-center">
+                          <label className="text-xs opacity-50">
+                            {isTurboMode ? 'SELECT MULTIPLE ACCOUNTS' : 'SELECT ACCOUNT'}
+                          </label>
+                          {isTurboMode && (
+                            <button 
+                              onClick={() => {
+                                if (selectedSessions.length === sessions.length) setSelectedSessions([]);
+                                else setSelectedSessions(sessions.map(s => s.phone));
+                              }}
+                              className="text-[10px] text-[#00ff00] hover:underline"
+                            >
+                              {selectedSessions.length === sessions.length ? 'DESELECT ALL' : 'SELECT ALL'}
+                            </button>
+                          )}
+                        </div>
                         {isTurboMode ? (
                           <div className="max-h-32 overflow-y-auto border border-[#00ff00]/30 rounded bg-black p-2 space-y-1">
                             {sessions.map(s => (

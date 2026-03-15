@@ -276,12 +276,14 @@ app.post("/api/add-members", async (req, res) => {
       }
 
       try {
-        const safeDelay = fastMode ? Math.max(parseInt(delay.toString()), 200) : Math.max(parseInt(delay.toString()), 15000);
-        const jitter = fastMode ? Math.floor(Math.random() * 300) : (Math.floor(Math.random() * 10000) + 5000);
+        const safeDelay = fastMode ? Math.max(parseInt(delay.toString()), 50) : Math.max(parseInt(delay.toString()), 15000);
+        const jitter = fastMode ? 0 : (Math.floor(Math.random() * 10000) + 5000);
         const totalDelay = safeDelay + jitter;
         
-        console.log(`[Telegram] ${fastMode ? 'FAST-MODE' : 'Human-Mimicry'}: Waiting ${Math.round(totalDelay/1000)}s before adding @${username}...`);
-        await new Promise(r => setTimeout(r, totalDelay));
+        if (totalDelay > 0) {
+          console.log(`[Telegram] ${fastMode ? 'FAST-MODE' : 'Human-Mimicry'}: Waiting ${Math.round(totalDelay/1000)}s before adding @${username}...`);
+          await new Promise(r => setTimeout(r, totalDelay));
+        }
 
         await client.invoke(new (await import("telegram/tl/index.js")).Api.channels.InviteToChannel({
           channel: target,
