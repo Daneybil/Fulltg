@@ -444,24 +444,17 @@ export default function App() {
       // Parallel processing for Turbo Mode
       const processBatch = async (sessionPhone: string, startIdx: number, step: number) => {
         let currentSession = sessionPhone;
-        let retryCount = 0;
         
         for (let i = startIdx; i < membersToTarget.length; i += step) {
           if (stopRef.current) break;
           
+          // Immediate Account Rotation Logic
           if (retiredSessions.has(currentSession)) {
             const available = activeSessions.find(s => !retiredSessions.has(s));
             if (available) {
               currentSession = available;
-              retryCount = 0;
-            } else if (isUnstoppable) {
-              addLog("info", "⚠️ All accounts are currently on cooldown. Waiting 60s before retrying loop...");
-              await new Promise(r => setTimeout(r, 60000));
-              retiredSessions.clear(); // Reset the cycle
-              i -= step; // Retry this member
-              continue;
             } else {
-              addLog("error", "All accounts are currently restricted (PEER_FLOOD). Stopping.");
+              addLog("error", "❌ All selected accounts have reached their limits. Process complete.");
               stopRef.current = true;
               break;
             }
@@ -476,34 +469,33 @@ export default function App() {
                 phone: currentSession, 
                 targetGroup, 
                 members: [username],
-                delay: isFastMode ? 200 : Math.max(parseInt(addDelay), 15000),
+                delay: isFastMode ? 50 : Math.max(parseInt(addDelay), 15000),
                 fastMode: isFastMode
               })
             });
 
             const data = await res.json();
             if (data.success && (data.results[0].status === "success" || data.results[0].status === "skipped")) {
-              const statusMsg = data.results[0].status === "skipped" ? `Skipped @${username} (Already added)` : `Added @${username}`;
+              const statusMsg = data.results[0].status === "skipped" ? `Skipped @${username}` : `Added @${username}`;
               addLog("success", `[${currentSession}] ${statusMsg}`);
             } else {
               const error = data.results?.[0]?.error || data.error || "Unknown error";
               
               if (error.includes("PEER_FLOOD") || error.includes("FLOOD_WAIT")) {
-                const isFloodWait = error.includes("FLOOD_WAIT");
-                addLog("error", `[${currentSession}] Account ${isFloodWait ? 'Flood Wait' : 'Restricted'}. Rotating...`);
+                addLog("error", `[${currentSession}] Restricted. Switching account...`);
                 retiredSessions.add(currentSession);
-                i -= step; // Retry this member with next account
+                i -= step; // Retry this member immediately with the next account
                 continue;
               }
 
-              // For any other error (Privacy, Not mutual, etc.), just skip and move on FAST
-              addLog("info", `[${currentSession}] Skipping @${username}: ${error.slice(0, 30)}...`);
+              // Skip invalid/private members instantly
+              addLog("info", `[${currentSession}] Skipping @${username} (Privacy/Invalid)`);
             }
           } catch (e) {
-            addLog("error", `Request failed for @${username}, skipping...`);
+            // Network error or timeout - skip and continue
           }
 
-          // Update progress in DB (only for the primary session to track overall progress)
+          // Update progress tracking
           if (currentSession === activeSessions[0]) {
             try {
               await safeFetch("/api/progress/save", {
@@ -518,14 +510,13 @@ export default function App() {
                   status: stopRef.current ? 'stopped' : 'running'
                 })
               });
-            } catch (e) {
-              console.error("Failed to save progress:", e);
-            }
+            } catch (e) {}
             setProgress(prev => ({ ...prev, current: i + 1 }));
           }
           
-          const actualDelay = isFastMode ? 50 : (Math.max(parseInt(addDelay), 15000) + Math.floor(Math.random() * 2000));
-          await new Promise(r => setTimeout(r, actualDelay));
+          // Minimal delay for high performance
+          const actualDelay = isFastMode ? 10 : (Math.max(parseInt(addDelay), 15000));
+          if (actualDelay > 0) await new Promise(r => setTimeout(r, actualDelay));
         }
       };
 
@@ -1233,7 +1224,7 @@ export default function App() {
                         <div className="flex items-center justify-between p-3 bg-blue-500/5 border border-blue-500/20 rounded">
                           <div className="flex items-center gap-2">
                             <div className={`w-2 h-2 rounded-full ${isUnstoppable ? 'bg-blue-500 animate-pulse' : 'bg-gray-600'}`} />
-                            <span className="text-xs font-bold text-blue-400">UNSTOPPABLE RESILIENCE MODE</span>
+                            <span className="text-xs font-bold text-blue-400">CONTINUOUS OPERATION MODE</span>
                           </div>
                           <button 
                             onClick={() => setIsUnstoppable(!isUnstoppable)}
