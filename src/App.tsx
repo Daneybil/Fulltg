@@ -448,16 +448,28 @@ export default function App() {
         for (let i = startIdx; i < membersToTarget.length; i += step) {
           if (stopRef.current) break;
           
-          // Immediate Account Rotation Logic
+          // Continuous Account Rotation Logic
           if (retiredSessions.has(currentSession)) {
             const available = activeSessions.find(s => !retiredSessions.has(s));
             if (available) {
               currentSession = available;
             } else {
-              addLog("error", "❌ All selected accounts have reached their limits. Process complete.");
-              stopRef.current = true;
-              break;
+              // If all accounts are restricted, wait a short time and retry the cycle
+              if (isUnstoppable) {
+                addLog("info", "⏳ All accounts restricted. Retrying cycle in 5s...");
+                await new Promise(r => setTimeout(r, 5000));
+                retiredSessions.clear(); // Clear restrictions to allow retrying
+                // Pick the next account in sequence
+                const nextIdx = (activeSessions.indexOf(currentSession) + 1) % activeSessions.length;
+                currentSession = activeSessions[nextIdx];
+              } else {
+                addLog("error", "❌ All selected accounts have reached their limits. Process complete.");
+                stopRef.current = true;
+                break;
+              }
             }
+            i -= step; // Retry the current member
+            continue;
           }
 
           const username = membersToTarget[i];
@@ -481,14 +493,22 @@ export default function App() {
             } else {
               const error = data.results?.[0]?.error || data.error || "Unknown error";
               
-              if (error.includes("PEER_FLOOD") || error.includes("FLOOD_WAIT")) {
-                addLog("error", `[${currentSession}] Restricted. Switching account...`);
+              // Account-level errors that should trigger rotation
+              const isAccountError = error.includes("PEER_FLOOD") || 
+                                    error.includes("FLOOD_WAIT") || 
+                                    error.includes("AUTH_KEY") || 
+                                    error.includes("SESSION") || 
+                                    error.includes("USER_DEACTIVATED") ||
+                                    error.includes("BANNED");
+
+              if (isAccountError) {
+                addLog("error", `[${currentSession}] Account issue: ${error.slice(0, 30)}. Rotating...`);
                 retiredSessions.add(currentSession);
                 i -= step; // Retry this member immediately with the next account
                 continue;
               }
 
-              // Skip invalid/private members instantly
+              // Member-level errors (Privacy, Invalid Username, etc.) - skip member
               addLog("info", `[${currentSession}] Skipping @${username} (Privacy/Invalid)`);
             }
           } catch (e) {
