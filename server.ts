@@ -223,15 +223,27 @@ app.post("/api/scrape", async (req, res) => {
     console.log(`Starting deep iteration for ${groupLink}...`);
 
     for await (const participant of client.iterParticipants(group, { limit: fetchLimit })) {
-      if (participant.username) {
-        allParticipants.push({
-          id: participant.id.toString(),
-          username: participant.username,
-          firstName: participant.firstName || "",
-          lastName: participant.lastName || "",
-          phone: participant.phone || null
-        });
-      }
+      // Filter out bots, deleted accounts, and users without usernames
+      if (participant.bot || participant.deleted) continue;
+      if (!participant.username) continue;
+
+      // Filter for active users (seen recently or online)
+      // This ensures we only add "real" people who are likely to engage
+      const isRecentlyActive = participant.status && (
+        participant.status.className === 'UserStatusRecently' || 
+        participant.status.className === 'UserStatusOnline' ||
+        participant.status.className === 'UserStatusLastWeek'
+      );
+
+      if (!isRecentlyActive) continue;
+
+      allParticipants.push({
+        id: participant.id.toString(),
+        username: participant.username,
+        firstName: participant.firstName || "",
+        lastName: participant.lastName || "",
+        phone: participant.phone || null
+      });
     }
 
     return res.json({ 
@@ -285,11 +297,19 @@ app.post("/api/add-members", async (req, res) => {
           await new Promise(r => setTimeout(r, totalDelay));
         }
 
-        await client.invoke(new (await import("telegram/tl/index.js")).Api.channels.InviteToChannel({
+        // Resolve user first to ensure they are "visible" and "real" to this account
+        // This prevents "simulated" success where Telegram might ignore a string username
+        const userEntity = await client.getEntity(username);
+        
+        const inviteResult = await client.invoke(new (await import("telegram/tl/index.js")).Api.channels.InviteToChannel({
           channel: target,
-          users: [username]
+          users: [userEntity]
         }));
         
+        // Telegram returns an Updates object. If it's empty or has no relevant updates, 
+        // it might mean the user wasn't added (e.g. already there or silent restriction)
+        console.log(`[Telegram] Invite result for @${username}:`, inviteResult.className);
+
         // Record success in history
         db.prepare("INSERT OR IGNORE INTO added_history (username, target_group) VALUES (?, ?)").run(username, targetGroup);
         
